@@ -481,7 +481,7 @@ if (!is.na(synid_folder_output)) {
                   prov_name = "Uncoded REDCap export",
                   prov_desc = "REDCap export data with variable values uncoded according to the data dictionary",
                   prov_used = c(synid_file_data, synid_file_dd),
-                  prov_exec = "https://github.com/Sage-Bionetworks/GENIE-Sponsored-Projects/blob/develop/scripts/uncode_redcap_export.R")
+                  prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/uncode_redcap_export.R")
   
   # clean up locally
   file.remove(file_output)
