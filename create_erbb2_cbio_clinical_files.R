@@ -24,9 +24,6 @@ waitifnot <- function(cond, msg) {
   }
 }
 
-# parameters
-outfiles <- c()
-
 # user input ----------------------------
 
 option_list <- list( 
@@ -204,7 +201,10 @@ save_to_synapse <- function(path,
 }
 
 get_patient_os_months <- function(df_data) {
-  os_months <- df_data$date_death_int - df_data$date_first_met_int
+  
+  os_months <- rep(NA, nrow(df_data))
+  idx_not_na <- which(!is.na(df_data$date_death_int) & !is.na(df_data$date_first_met_int))
+  os_months[idx_not_na] <- round((as.double(df_data$date_death_int[idx_not_na]) - as.double(df_data$date_first_met_int[idx_not_na])) / 30.4)
   return(os_months)
 }
 
@@ -217,87 +217,122 @@ get_patient_os_status <- function(df_data) {
 }
 
 get_sample_seq_assay_id <- function(df_data, sample_no, synid_table_assay = "syn7517674") {
+  
+  
   var_sample_id <- glue("sample_id_{sample_no}")
-  sample_ids <- paste0(df_data[var_sample_id], collapse = "','")
-  query <- "SELECT SEQ_ASSAY_ID FROM {synid_table_assay} WHERE SAMPLE_ID IN '({sample_ids})'"
-  seq_assay_id <- synTableQuery(query)
-  return(seq_assay_id)
+  sample_ids <- paste0(df_data[,var_sample_id], collapse = "','")
+  query <- glue("SELECT SAMPLE_ID, SEQ_ASSAY_ID FROM {synid_table_assay} WHERE SAMPLE_ID IN ('{sample_ids}')")
+  df_assay <- as.data.frame(synTableQuery(query, includeRowIdAndRowVersion = F))
+  
+  df_data_assay <- df_data %>% 
+    left_join(df_assay, by = setNames("SAMPLE_ID", var_sample_id)) %>%
+    select(SEQ_ASSAY_ID)
+  
+  return(unlist(df_data_assay))
 }
 
 get_timeline_specimen_start_date <- function(df_data, sample_no) {
-  start_date <- df_data$primary_dx_date_int - df_data[glue("seq_report_date_int_{sample_no}")]
+  
+  start_date <- rep(NA, nrow(df_data))
+  var_sample_id <- glue("seq_report_date_int_{sample_no}")
+  
+  idx_not_na <- which(!is.na(df_data$primary_dx_date_int) & !is.na(unlist(df_data[var_sample_id])))
+  start_date[idx_not_na] <- as.double(df_data$primary_dx_date_int[idx_not_na]) - as.double(unlist(df_data[var_sample_id])[idx_not_na])
   return(start_date)
 }
 
-get_fxn <- function(sampleType, code) {
+get_fxn <- function(sampleType, cbio) {
   
-  map_fxn_str <- c()
-  map_fxn_str["get_patient_os_months"] <- get_patient_os_months()
-  map_fxn_str["get_patient_os_status"] <- get_patient_os_status()
-  map_fxn_str["get_sample_seq_assay_id"] <- get_sample_seq_assay_id()
-  map_fxn_str["get_timeline_specimen_start_date"] <- get_timeline_specimen_start_date()
+  map_fxn_str <- list()
+  labels <- c("get_patient_os_months", "get_patient_os_status", 
+              "get_sample_seq_assay_id", "get_timeline_specimen_start_date")
   
-  label <- glue("get_{tolower(gsub('-', '_', sampleType))}_{tolower(code)}")
+  for (label in labels) {
+    map_fxn_str[[label]] <- get(label)
+  }
   
-  return(map_fxn_str[label])
+  return(map_fxn_str[[glue("get_{tolower(gsub('-', '_', sampleType))}_{tolower(cbio)}")]])
 }
 
-create_patient <- function(df_data, cbio, code, instructions) {
+filter_empty_rows <- function(df_cbio, primary_key) {
+  idx_rm <- which(is.na(df_cbio[primary_key]))
+  if (length(idx_rm)) {
+    return(df_cbio[-idx,])
+  }
+  return(df_cbio)
+}
+
+filter_null_start_date <- function(df_cbio, col_start = "START_DATE") {
+  idx_rm <- which(is.na(df_cbio[col_start]))
+  if (length(idx_rm)) {
+    return(df_cbio[-idx,])
+  }
+  return(df_cbio)
+}
+
+create_patient <- function(df_data, cbio, code, instructions = NULL) {
   
   mat <- matrix(NA, nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
   
   for (i in 1:length(cbio)) {
-    if (code == "ETL_OPERATION") {
-      fxn <- get_fxn(sampleType = "PATIENT", code = code[i])
+    if (code[i] == "ETL_OPERATION") {
+      fxn <- get_fxn(sampleType = "PATIENT", cbio = cbio[i])
       mat[,cbio[i]] <- fxn(df_data)
     } else {
-      mat[,cbio[i]] <- df_data[code[i]]
+      mat[,cbio[i]] <- df_data[,code[i]]
     }
   }
   
   return(data.frame(mat))
 }
 
-create_sample <- function(df_data, cbio, code, instructions, sample_nos = c(1:10)) {
+create_sample <- function(df_data, cbio, code, instructions = NULL, sample_nos = c(1:10)) {
   
   mat <- matrix(nrow = 0, ncol = length(cbio), dimnames = list(c(), cbio))
   
   for (sample_no in sample_nos) {
     
-    code_no <- sapply(glue, code)
-    mat_no <- matrix(nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
+    code_no <- sapply(code, glue)
+    mat_no <- matrix(NA, nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
     
     for (i in 1:length(cbio)) {
-      if (code == "ETL_OPERATION") {
-        fxn <- get_fxn(sampleType = "SAMPLE", code = code[i])
-        mat[,cbio[i]] <- fxn(df_data)
+      if (code_no[i] == "ETL_OPERATION") {
+        fxn <- get_fxn(sampleType = "SAMPLE", cbio = cbio[i])
+        mat_no[,cbio[i]] <- fxn(df_data, sample_no)
       } else {
-        mat_no[,cbio[i]] <- df_data[code_no[i]]
+        if (length(which(colnames(df_data) == code_no[i]))) {
+          mat_no[,cbio[i]] <- df_data[,code_no[i]]
+        }
       }
     }
     
     mat <- rbind(mat, mat_no)
   }
   
-  return(data.frame(mat))
+  df_final <- filter_empty_rows(df_cbio = data.frame(mat), primary_key = "SAMPLE_ID") 
+  
+  return(df_final)
 }
 
-create_timeline_treatment <- function(df_data, cbio, code, instructions, therapy_nos = c(1:25), drug_nos = c(1:5)) {
+create_timeline_treatment <- function(df_data, cbio, code, instructions, 
+                                      therapy_nos = c(1:25), drug_nos = c(1:5)) {
   
   mat <- matrix(nrow = 0, ncol = length(cbio), dimnames = list(c(), cbio))
   
   for (therapy_no in therapy_nos) {
     for (drug_no in drug_nos) {
       
-      code_no <- sapply(glue, code)
+      code_no <- sapply(code, glue)
       mat_no <- matrix(nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
+      instructions_no <- sapply(code, glue)
       
       for (i in 1:length(cbio)) {
-        if (code == "ETL_OPERATION") {
-          fxn <- get_fxn(sampleType = "SAMPLE", code = code[i])
-          mat[,cbio[i]] <- fxn(df_data)
+        if (code_no[i] == "ETL_CONSTANT") {
+          mat[,cbio[i]] <- instructions[i]
         } else {
-          mat_no[,cbio[i]] <- df_data[code_no[i]]
+          if (length(which(colnames(df_data) == code_no[i]))) {
+            mat_no[,cbio[i]] <- df_data[,code_no[i]]
+          }
         }
       }
       
@@ -305,61 +340,110 @@ create_timeline_treatment <- function(df_data, cbio, code, instructions, therapy
     }
   }
   
-  return(data.frame(mat))
+  df_final <- filter_empty_rows(df_cbio = data.frame(mat), primary_key = "AGENT") 
+  df_final <- filter_null_start_date(df_cbio = df_final)
+  
+  return(df_final)
 }
 
 create_timeline_specimen <- function(df_data, cbio, code, instructions) {
-  df_cbio <- NULL
-  return(df)
+  mat <- matrix(nrow = 0, ncol = length(cbio), dimnames = list(c(), cbio))
+  
+  for (sample_no in sample_nos) {
+    
+    code_no <- sapply(code, glue)
+    mat_no <- matrix(NA, nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
+    
+    for (i in 1:length(cbio)) {
+      if (code_no[i] == "ETL_OPERATION") {
+        fxn <- get_fxn(sampleType = "SAMPLE", cbio = cbio[i])
+        mat_no[,cbio[i]] <- fxn(df_data, sample_no)
+      } else if (code_no[i] == "ETL_CONSTANT") {
+        mat[,cbio[i]] <- instructions[i]
+      } else {
+        if (length(which(colnames(df_data) == code_no[i]))) {
+          mat_no[,cbio[i]] <- df_data[,code_no[i]]
+        }
+      }
+    }
+    
+    mat <- rbind(mat, mat_no)
+  }
+  
+  df_final <- filter_null_start_date(df_cbio = data.frame(mat))
+  
+  return(df_final)
 }
 
 create_timeline_status <- function(df_data, cbio, code, instructions) {
-  df_cbio <- NULL
-  return(df)
+  mat <- matrix(NA, nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
+  
+  for (i in 1:length(cbio)) {
+    if (code[i] == "ETL_CONSTANT") {
+      mat[,cbio[i]] <- instructions[i]
+    } else {
+      mat[,cbio[i]] <- df_data[,code[i]]
+    }
+  }
+  
+  df_final <- filter_null_start_date(df_cbio = data.frame(mat))
+  
+  return(df_final)
 }
 
 create_df <- function(df_data, df_map, sampleType) {
   
-  df_data_type <- NULL
+  df_cbio_type <- NULL
   
-  df_map_type <- mapping %>% filter(sampleType == sampleType)
+  df_map_type <- df_map %>% filter(sampleType == (!!sampleType))
   cbio = df_map_type$cbio
   code = df_map_type$code
   instructions = df_map_type$instructions
   
   if (sampleType == "PATIENT") {
-    df_data_type <- create_patient(df_data, cbio, code, instructions)
+    df_cbio_type <- create_patient(df_data, cbio, code, instructions)
   } else if (sampleType == "SAMPLE") {
-    df_data_type <- create_sample(df_data, cbio, code, instructions)
+    df_cbio_type <- create_sample(df_data, cbio, code, instructions)
   } else if (sampleType == "TIMELINE-TREATMENT") {
-    df_data_type <- create_timeline_treatment(df_data, cbio, code, instructions)
+    df_cbio_type <- create_timeline_treatment(df_data, cbio, code, instructions)
   } else if (sampleType == "TIMELINE-SPECIMEN") {
-    df_data_type <- create_timeline_specimen(df_data, cbio, code, instructions)
+    df_cbio_type <- create_timeline_specimen(df_data, cbio, code, instructions)
   } else if (sampleType == "TIMELINE-STATUS") {
-    df_data_type <- create_timeline_status(df_data, cbio, code, instructions)
+    df_cbio_type <- create_timeline_status(df_data, cbio, code, instructions)
   } else {
     message(glue("ERROR: {sampleType} not implemented.  Quitting..."))
     stop()
   }
   
-  return(df_data_type)
+  return(df_cbio_type)
 }
 
-write_patient <- function(df, description, colType, filename = "data_clinical_patient.txt") {
+write_patient <- function(df, label, description, colType, filename = "data_clinical_patient.txt", delim = "\t") {
+  
+  header <- rbind(label, description, colType, rep(1))
+  header <- t(apply(header, 1, function(x) {return(c(paste0("#", x[1]), x[2:length(x)]))}))
+  header <- rbind(header, colnames(df))
+  rownames(header) <- NULL
+  colnames(header) <- colnames(df)
+  
+  df_write <- rbind(header, df)
+  write.table(df_write, file = filename, sep = delim, na = "",
+              col.names = F, row.names = F, quote = F)
+  
   return(filename)
 }
 
-write_sample <- function(df, description, colType, filename = "data_clinical_sample.txt") {
+write_sample <- function(df, description, colType, filename = "data_clinical_sample.txt", delim = "\t") {
   return(filename)
 }
 
-write_timeline <- function(dfs, filename = "data_timeline.txt") {
+write_timeline <- function(dfs, filename = "data_timeline.txt", delim = "\t") {
   return(filename)
 }
 
 # synapse login --------------------
 
-synLogin(auth = auth)
+status <- synLogin(auth = auth)
 
 # read ----------------------------
 
@@ -367,10 +451,10 @@ if (verbose) {
   print(glue("{now(timeOnly=T)}: reading data and mapping..."))
 }
 
-df_data <- get_synapse_entity_data_in_csv(synid_file_data)
+df_data <- get_synapse_entity_data_in_csv(synid_file_input, na.strings = c("NA",""))
 
-query <- "SELECT * FROM {synid_table_map}"
-df_map <- as.data.frame(synTableQuery(query, includeRowIdAndVersion = F))
+query <- glue("SELECT * FROM {synid_table_map}")
+df_map <- as.data.frame(synTableQuery(query, includeRowIdAndRowVersion = F))
 
 # main ----------------------------
 
@@ -379,8 +463,14 @@ if (verbose) {
 }
 
 # create each data frame
-for (sampleType in mapping %>% sampleType %>% distinct()) {
-  dfs[[sampleType]] <- create_df(df_data = df_data, df_map = df_map, sampleType = sampleType)
+dfs <- list()
+for (sampleType in unlist(df_map %>% select(sampleType) %>% distinct())) {
+  if (sampleType != "ETL") {
+    if (verbose) {
+      print(glue("{now(timeOnly=T)}: generating {sampleType} data frame..."))
+    }
+    dfs[[sampleType]] <- create_df(df_data = df_data, df_map = df_map, sampleType = sampleType)
+  }
 }
 
 if (verbose) {
@@ -388,7 +478,10 @@ if (verbose) {
 }
 
 # write data frames to file locally
-outfile_pat <- write_patient(dfs[["PATIENT"]])
+outfile_pat <- write_patient(dfs[["PATIENT"]], 
+                             label = unlist(df_map %>% filter(sampleType == "PATIENT") %>% select(labels)),
+                             description = unlist(df_map %>% filter(sampleType == "PATIENT") %>% select(description)),
+                             colType = unlist(df_map %>% filter(sampleType == "PATIENT") %>% select(colType)))
 outfile_sam <- write_sample(dfs[["SAMPLE"]])
 outfile_tl <- write_timeline(dfs[[grepl(names(dfs), value = T)]])
 
@@ -403,21 +496,21 @@ if (!is.na(synid_folder_output)) {
                                     parent_id = synid_folder_output, 
                                     prov_name = "ERBB2 cbio patient file", 
                                     prov_desc = "GENIE ERBB2 cBioPortal patient clinical file", 
-                                    prov_used = c(synid_file_data, synid_table_map), 
+                                    prov_used = c(synid_file_input, synid_table_map), 
                                     prov_exec = "")
   
   synid_file_sam <- save_to_synapse(path = outfile_sam, 
                                     parent_id = synid_folder_output, 
                                     prov_name = "ERBB2 cbio sample file", 
                                     prov_desc = "GENIE ERBB2 cBioPortal sample clinical file", 
-                                    prov_used = c(synid_file_data, synid_table_map), 
+                                    prov_used = c(synid_file_input, synid_table_map), 
                                     prov_exec = "")
   
   synid_file_tl <- save_to_synapse(path = outfile_tl, 
                                     parent_id = synid_folder_output, 
                                     prov_name = "ERBB2 cbio timeline file", 
                                     prov_desc = "GENIE ERBB2 cBioPortal timeline file", 
-                                    prov_used = c(synid_file_data, synid_table_map), 
+                                    prov_used = c(synid_file_input, synid_table_map), 
                                     prov_exec = "")
 }
 
