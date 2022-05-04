@@ -31,17 +31,15 @@ option_list <- list(
               help="Synapse ID of uncoded REDCap export"),
   make_option(c("-m", "--synid_table_map"), type = "character",
               help="Synapse ID of table of REDCap to cBio mapping"),
-  make_option(c("-o", "--synid_folder_output"), type = "character",
-              help="Synapse ID of output folder"),
-  make_option(c("-v", "--verbose"), action="store_true", default = FALSE, 
-              help="Output script messages to the user."),
-  make_option(c("-a", "--auth"), 
-              type = "character",
-              default = NA,
+  make_option(c("-o", "--synid_folder_output"), type = "character", default = NA,
+              help="Synapse ID of output folder (default: write locally only)"),
+  make_option(c("-v", "--verbose"), action="store_true", default = F, 
+              help="Output script messages to the user. (default: FALSE)"),
+  make_option(c("-a", "--auth"), type = "character", default = NA,
               help="Synapse personal access token or path to .synapseConfig (default: normal synapse login behavior)")
 )
 opt <- parse_args(OptionParser(option_list=option_list))
-waitifnot(!is.null(opt$synid_file_input) && !is.null(opt$synid_folder_output),
+waitifnot(!is.null(opt$synid_file_input) && !is.null(opt$synid_table_map),
           msg = "Rscript template.R -h")
 
 synid_file_input <- opt$synid_file_input
@@ -236,8 +234,11 @@ get_timeline_specimen_start_date <- function(df_data, sample_no) {
   start_date <- rep(NA, nrow(df_data))
   var_sample_id <- glue("seq_report_date_int_{sample_no}")
   
-  idx_not_na <- which(!is.na(df_data$primary_dx_date_int) & !is.na(unlist(df_data[var_sample_id])))
-  start_date[idx_not_na] <- as.double(df_data$primary_dx_date_int[idx_not_na]) - as.double(unlist(df_data[var_sample_id])[idx_not_na])
+  if (length(which(colnames(df_data) == var_sample_id))) {
+    idx_not_na <- which(!is.na(df_data$primary_dx_date_int) & !is.na(unlist(df_data[var_sample_id])))
+    start_date[idx_not_na] <- as.double(df_data$primary_dx_date_int[idx_not_na]) - as.double(unlist(df_data[var_sample_id])[idx_not_na])
+  }
+  
   return(start_date)
 }
 
@@ -257,7 +258,7 @@ get_fxn <- function(sampleType, cbio) {
 filter_empty_rows <- function(df_cbio, primary_key) {
   idx_rm <- which(is.na(df_cbio[primary_key]))
   if (length(idx_rm)) {
-    return(df_cbio[-idx,])
+    return(df_cbio[-idx_rm,])
   }
   return(df_cbio)
 }
@@ -265,7 +266,7 @@ filter_empty_rows <- function(df_cbio, primary_key) {
 filter_null_start_date <- function(df_cbio, col_start = "START_DATE") {
   idx_rm <- which(is.na(df_cbio[col_start]))
   if (length(idx_rm)) {
-    return(df_cbio[-idx,])
+    return(df_cbio[-idx_rm,])
   }
   return(df_cbio)
 }
@@ -292,16 +293,16 @@ create_sample <- function(df_data, cbio, code, instructions = NULL, sample_nos =
   
   for (sample_no in sample_nos) {
     
-    code_no <- sapply(code, glue)
     mat_no <- matrix(NA, nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
     
     for (i in 1:length(cbio)) {
-      if (code_no[i] == "ETL_OPERATION") {
+      code_no <- glue(code[i])
+      if (code_no == "ETL_OPERATION") {
         fxn <- get_fxn(sampleType = "SAMPLE", cbio = cbio[i])
         mat_no[,cbio[i]] <- fxn(df_data, sample_no)
       } else {
-        if (length(which(colnames(df_data) == code_no[i]))) {
-          mat_no[,cbio[i]] <- df_data[,code_no[i]]
+        if (length(which(colnames(df_data) == code_no))) {
+          mat_no[,cbio[i]] <- df_data[,code_no]
         }
       }
     }
@@ -322,16 +323,18 @@ create_timeline_treatment <- function(df_data, cbio, code, instructions,
   for (therapy_no in therapy_nos) {
     for (drug_no in drug_nos) {
       
-      code_no <- sapply(code, glue)
       mat_no <- matrix(nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
-      instructions_no <- sapply(code, glue)
       
       for (i in 1:length(cbio)) {
-        if (code_no[i] == "ETL_CONSTANT") {
-          mat[,cbio[i]] <- instructions[i]
+        
+        code_no <- glue(code[i])
+        instructions_no <- glue(instructions[i])
+        
+        if (code_no == "ETL_CONSTANT") {
+          mat_no[,cbio[i]] <- instructions_no
         } else {
-          if (length(which(colnames(df_data) == code_no[i]))) {
-            mat_no[,cbio[i]] <- df_data[,code_no[i]]
+          if (length(which(colnames(df_data) == code_no))) {
+            mat_no[,cbio[i]] <- df_data[,code_no]
           }
         }
       }
@@ -346,23 +349,23 @@ create_timeline_treatment <- function(df_data, cbio, code, instructions,
   return(df_final)
 }
 
-create_timeline_specimen <- function(df_data, cbio, code, instructions) {
+create_timeline_specimen <- function(df_data, cbio, code, instructions, sample_nos = c(1:10)) {
   mat <- matrix(nrow = 0, ncol = length(cbio), dimnames = list(c(), cbio))
   
   for (sample_no in sample_nos) {
     
-    code_no <- sapply(code, glue)
     mat_no <- matrix(NA, nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
     
     for (i in 1:length(cbio)) {
-      if (code_no[i] == "ETL_OPERATION") {
-        fxn <- get_fxn(sampleType = "SAMPLE", cbio = cbio[i])
+      code_no <- glue(code[i])
+      if (code_no == "ETL_OPERATION") {
+        fxn <- get_fxn(sampleType = "TIMELINE-SPECIMEN", cbio = cbio[i])
         mat_no[,cbio[i]] <- fxn(df_data, sample_no)
-      } else if (code_no[i] == "ETL_CONSTANT") {
-        mat[,cbio[i]] <- instructions[i]
+      } else if (code_no == "ETL_CONSTANT") {
+        mat_no[,cbio[i]] <- instructions[i]
       } else {
-        if (length(which(colnames(df_data) == code_no[i]))) {
-          mat_no[,cbio[i]] <- df_data[,code_no[i]]
+        if (length(which(colnames(df_data) == code_no))) {
+          mat_no[,cbio[i]] <- df_data[,code_no]
         }
       }
     }
@@ -418,13 +421,25 @@ create_df <- function(df_data, df_map, sampleType) {
   return(df_cbio_type)
 }
 
-write_patient <- function(df, label, description, colType, filename = "data_clinical_patient.txt", delim = "\t") {
-  
+create_cbio_clinical_header <- function(df, label, description, colType) {
   header <- rbind(label, description, colType, rep(1))
   header <- t(apply(header, 1, function(x) {return(c(paste0("#", x[1]), x[2:length(x)]))}))
   header <- rbind(header, colnames(df))
   rownames(header) <- NULL
   colnames(header) <- colnames(df)
+  return(header)
+}
+
+get_cbio_filename <- function(file_type) {
+  mapping <- setNames(c("data_clinical_sample.txt", "data_clinical_patient.txt", "data_timeline.txt"),
+                      c("SAMPLE", "PATIENT", "TIMELINE"))
+  return(mapping[file_type])
+}
+
+write_cbio_clinical <- function(df, label, description, colType, sampleType, delim = "\t") {
+  
+  filename <- get_cbio_filename(sampleType)
+  header <- create_cbio_clinical_header(df, label, description, colType)
   
   df_write <- rbind(header, df)
   write.table(df_write, file = filename, sep = delim, na = "",
@@ -433,11 +448,10 @@ write_patient <- function(df, label, description, colType, filename = "data_clin
   return(filename)
 }
 
-write_sample <- function(df, description, colType, filename = "data_clinical_sample.txt", delim = "\t") {
-  return(filename)
-}
-
-write_timeline <- function(dfs, filename = "data_timeline.txt", delim = "\t") {
+write_cbio_timeline <- function(df, delim = "\t") {
+  filename <- get_cbio_filename("TIMELINE")
+  write.table(df, file = filename, sep = delim, na = "",
+              col.names = T, row.names = F, quote = F)
   return(filename)
 }
 
@@ -453,7 +467,7 @@ if (verbose) {
 
 df_data <- get_synapse_entity_data_in_csv(synid_file_input, na.strings = c("NA",""))
 
-query <- glue("SELECT * FROM {synid_table_map}")
+query <- glue("SELECT * FROM {synid_table_map} ORDER BY sampleType, columnOrder")
 df_map <- as.data.frame(synTableQuery(query, includeRowIdAndRowVersion = F))
 
 # main ----------------------------
@@ -473,17 +487,32 @@ for (sampleType in unlist(df_map %>% select(sampleType) %>% distinct())) {
   }
 }
 
+# write -----------------
+
 if (verbose) {
   print(glue("{now(timeOnly=T)}: writing files locally..."))
 }
 
-# write data frames to file locally
-outfile_pat <- write_patient(dfs[["PATIENT"]], 
-                             label = unlist(df_map %>% filter(sampleType == "PATIENT") %>% select(labels)),
-                             description = unlist(df_map %>% filter(sampleType == "PATIENT") %>% select(description)),
-                             colType = unlist(df_map %>% filter(sampleType == "PATIENT") %>% select(colType)))
-outfile_sam <- write_sample(dfs[["SAMPLE"]])
-outfile_tl <- write_timeline(dfs[[grepl(names(dfs), value = T)]])
+# write clinical data frames to file locally
+outfiles <- c()
+for (sampleType in c("PATIENT", "SAMPLE")) {
+  outfiles[sampleType] <- write_cbio_clinical (dfs[[sampleType]], 
+                                      label = unlist(df_map %>% filter(sampleType == (!!sampleType)) %>% select(labels)),
+                                      description = unlist(df_map %>% filter(sampleType == (!!sampleType)) %>% select(description)),
+                                      sampleType = sampleType,
+                                      colType = unlist(df_map %>% filter(sampleType == (!!sampleType)) %>% select(colType)))
+}
+
+# consolidate write timeline data frame locally
+df_timeline <- NULL
+for (sampleType in grep(names(dfs), pattern = "^TIMELINE-", value = T)) {
+  if (is.null(df_timeline)) {
+    df_timeline <- dfs[[sampleType]]
+  } else {
+    df_timeline <- df_timeline %>% bind_rows(dfs[[sampleType]])
+  }
+}
+outfiles["TIMELINE"] <- write_cbio_timeline(df_timeline)
 
 # store to synpase
 if (!is.na(synid_folder_output)) {
@@ -492,30 +521,17 @@ if (!is.na(synid_folder_output)) {
     print(glue("{now(timeOnly=T)}: storing files to Synapse in folder {synid_folder_output}..."))
   }
   
-  synid_file_pat <- save_to_synapse(path = outfile_pat, 
-                                    parent_id = synid_folder_output, 
-                                    prov_name = "ERBB2 cbio patient file", 
-                                    prov_desc = "GENIE ERBB2 cBioPortal patient clinical file", 
-                                    prov_used = c(synid_file_input, synid_table_map), 
-                                    prov_exec = "")
-  
-  synid_file_sam <- save_to_synapse(path = outfile_sam, 
-                                    parent_id = synid_folder_output, 
-                                    prov_name = "ERBB2 cbio sample file", 
-                                    prov_desc = "GENIE ERBB2 cBioPortal sample clinical file", 
-                                    prov_used = c(synid_file_input, synid_table_map), 
-                                    prov_exec = "")
-  
-  synid_file_tl <- save_to_synapse(path = outfile_tl, 
-                                    parent_id = synid_folder_output, 
-                                    prov_name = "ERBB2 cbio timeline file", 
-                                    prov_desc = "GENIE ERBB2 cBioPortal timeline file", 
-                                    prov_used = c(synid_file_input, synid_table_map), 
-                                    prov_exec = "")
+  for (outfile in outfiles) {
+    synid_file_cbio <- save_to_synapse(path = outfile, 
+                                      parent_id = synid_folder_output, 
+                                      prov_name = "ERBB2 cBioPortal file", 
+                                      prov_desc = "GENIE ERBB2 Sponsored Project data in cBioPortal format", 
+                                      prov_used = c(synid_file_input, synid_table_map), 
+                                      prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/create_erbb2_cbio_clinical_files.R")
+  }
 }
 
 # close out ----------------------------
-
 
 toc = as.double(Sys.time())
 print(glue("Runtime: {round(toc - tic)} s"))
