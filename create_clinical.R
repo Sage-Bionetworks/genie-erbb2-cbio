@@ -40,7 +40,7 @@ option_list <- list(
 )
 opt <- parse_args(OptionParser(option_list=option_list))
 waitifnot(!is.null(opt$synid_file_input) && !is.null(opt$synid_table_map),
-          msg = "Rscript template.R -h")
+          msg = "Rscript create_clinical.R -h")
 
 synid_file_input <- opt$synid_file_input
 synid_table_map <- opt$synid_table_map
@@ -527,7 +527,7 @@ if (!is.na(synid_folder_output)) {
                                       prov_name = "ERBB2 cBioPortal file", 
                                       prov_desc = "GENIE ERBB2 Sponsored Project data in cBioPortal format", 
                                       prov_used = c(synid_file_input, synid_table_map), 
-                                      prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/create_erbb2_cbio_clinical_files.R")
+                                      prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/create_clinical.R")
   }
 }
 
