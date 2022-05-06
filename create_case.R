@@ -328,10 +328,12 @@ create_case_breast <- function(synid_files_cbio, cancer_study_identifier) {
 #' Samples with CNA data
 create_case_cna <- function(synid_files_cbio, cancer_study_identifier) {
 
-  synid_file_cna <- as.character(synid_files_cbio["cna"])
-  df_cna <- get_synapse_entity_data_in_csv(synid_file_cna, sep = "\t")
+  synid_file_matrix<- as.character(synid_files_cbio["matrix"])
+  df_matrix <- get_synapse_entity_data_in_csv(synid_file_matrix, sep = "\t", na.strings = "NA")
   
-  sample_ids <- colnames(df_cna)[2:ncol(df_cna)]
+  sample_ids <- as.character(unlist(df_matrix %>% 
+    filter(!is.na(cna)) %>%
+    select(SAMPLE_ID)))
   
   df_case <- create_case_generic(cancer_study_identifier=cancer_study_identifier, 
                                  stable_id = glue("{cancer_study_identifier}_cna"), 
@@ -343,17 +345,13 @@ create_case_cna <- function(synid_files_cbio, cancer_study_identifier) {
 
 #' Samples that have mutation AND CNA data.
 create_case_cnaseq <- function(synid_files_cbio, cancer_study_identifier) {
-  synid_file_maf <- as.character(synid_files_cbio["maf"])
-  df_maf <- get_synapse_entity_data_in_csv(synid_file_maf, sep = "\t")
   
-  synid_file_cna <- as.character(synid_files_cbio["cna"])
-  df_cna <- get_synapse_entity_data_in_csv(synid_file_cna, sep = "\t")
+  synid_file_matrix<- as.character(synid_files_cbio["matrix"])
+  df_matrix <- get_synapse_entity_data_in_csv(synid_file_matrix, sep = "\t", na.strings = "NA")
   
-  sample_ids_maf <- unlist(df_maf %>% 
-                             select(Tumor_Sample_Barcode) %>% 
-                             distinct())
-  sample_ids_cna <- colnames(df_cna)[2:ncol(df_cna)]
-  sample_ids <- intersect(sample_ids_maf, sample_ids_cna)
+  sample_ids <- as.character(unlist(df_matrix %>% 
+                                      filter(!is.na(cna) & !is.na(mutations)) %>%
+                                      select(SAMPLE_ID)))
   
   df_case <- create_case_generic(cancer_study_identifier=cancer_study_identifier, 
                                  stable_id = glue("{cancer_study_identifier}_cnaseq"), 
@@ -365,17 +363,12 @@ create_case_cnaseq <- function(synid_files_cbio, cancer_study_identifier) {
 
 #' Samples that have mutation OR CNA data.
 create_case_seq <- function(synid_files_cbio, cancer_study_identifier) {
-  synid_file_maf <- as.character(synid_files_cbio["maf"])
-  df_maf <- get_synapse_entity_data_in_csv(synid_file_maf, sep = "\t")
+  synid_file_matrix<- as.character(synid_files_cbio["matrix"])
+  df_matrix <- get_synapse_entity_data_in_csv(synid_file_matrix, sep = "\t", na.strings = "NA")
   
-  synid_file_cna <- as.character(synid_files_cbio["cna"])
-  df_cna <- get_synapse_entity_data_in_csv(synid_file_cna, sep = "\t")
-  
-  sample_ids_maf <- unlist(df_maf %>% 
-                             select(Tumor_Sample_Barcode) %>% 
-                             distinct())
-  sample_ids_cna <- colnames(df_cna)[2:ncol(df_cna)]
-  sample_ids <- union(sample_ids_maf, sample_ids_cna)
+  sample_ids <- as.character(unlist(df_matrix %>% 
+                                      filter(!is.na(cna) | !is.na(mutations)) %>%
+                                      select(SAMPLE_ID)))
   
   df_case <- create_case_generic(cancer_study_identifier=cancer_study_identifier, 
                                  stable_id = glue("{cancer_study_identifier}_sequenced"), 
@@ -384,7 +377,7 @@ create_case_seq <- function(synid_files_cbio, cancer_study_identifier) {
                                  case_list_ids = sample_ids)
 }
 
-create_case <- function(file_type, synid_files_cbio) {
+create_case <- function(file_type, synid_files_cbio, cancer_study_identifier) {
   
   df_type <- NULL
   
@@ -432,7 +425,7 @@ for (i in 1:length(filenames)) {
   filename <- as.character(filenames[i]) 
   
   if (verbose) { glue("{now()}: creating '{file_type}' case file...") }
-  df_file <- create_case(file_type = file_type, synid_files_cbio = synid_files_cbio)
+  df_file <- create_case(file_type = file_type, synid_files_cbio = synid_files_cbio, cancer_study_identifier = cancer_study_identifier)
   
   if (verbose) { glue("{now()}: writing '{file_type}' to file '{filename}'...") }
   filename <- write_case(df_file, file = filename)
