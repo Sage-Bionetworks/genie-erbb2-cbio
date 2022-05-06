@@ -449,7 +449,7 @@ for (i in 1:length(filenames)) {
                                      prov_name = "ERBB2 cBioPortal file", 
                                      prov_desc = "GENIE ERBB2 Sponsored Project data in cBioPortal format", 
                                      prov_used = as.character(synid_files_cbio), 
-                                     prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/create_genomic.R")
+                                     prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/create_cases.R")
     
     if (verbose) { print(glue("{now()}: file '{filename}' saved to {synid_file_df}.")) } 
   }
