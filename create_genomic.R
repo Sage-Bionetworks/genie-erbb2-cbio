@@ -351,7 +351,7 @@ create_cna <- function(synid_file_mg, sample_ids, n_row_per_chunk = 50) {
   
   # subset cna in chunks
   n_row_total <- as.double(strsplit(system(glue("wc -l {filepath}"), intern = T), split = " ")[[1]][1])
-  df_subset <- matrix("NA", nrow = n_row_total - 1, ncol = length(idx), dimnames = list(c(), header_cna[idx]))
+  df_subset <- matrix(NA, nrow = n_row_total - 1, ncol = length(idx), dimnames = list(c(), header_cna[idx]))
   for (i in seq(from = 2, to = n_row_total, by = n_row_per_chunk)) {
     chunk <- matrix(scan(filepath, nlines = n_row_per_chunk, skip = i-1, what = "character", quiet = T), ncol = length(header_cna), byrow = T)[,idx]
     df_subset[(i-1):(i+nrow(chunk)-2),] <- chunk
@@ -364,7 +364,6 @@ create_matrix <- function(synid_file_mg, sample_ids) {
   df_mg <- get_synapse_entity_data_in_csv(synid_file_mg, sep = "\t", na.strings = "")
   df_subset <- df_mg %>% 
     filter(is.element(SAMPLE_ID, sample_ids))
-  df_subset[which(is.na(df_subset), arr.ind = T)] <- "NA"
   return(df_subset)
 }
 
@@ -422,7 +421,7 @@ create_df <- function(file_type, synid_files_mg, sample_ids) {
 }
 
 write_df <- function(df_file, filename, delim = "\t") {
-  write.table(df_file, row.names = F, sep = delim, file = filename, na = "", quote = F)
+  write.table(df_file, row.names = F, sep = delim, file = filename, na = "NA", quote = F)
   return(filename)
 }
 
