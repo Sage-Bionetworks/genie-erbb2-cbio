@@ -48,6 +48,16 @@ synid_folder_output <- opt$synid_folder_output
 verbose <- opt$verbose
 auth <- opt$auth
 
+if (verbose) {
+  print(glue("Parameters:"))
+  print(glue("----------"))
+  print(glue("synid_file_input:\t{synid_file_input}"))
+  print(glue("synid_folder_output:\t{synid_folder_output}"))
+  print(glue("synid_table_map:\t{synid_table_map}"))
+  print(glue("verbose:\t\t{verbose}"))
+  print(glue("----------"))
+}
+
 # functions ----------------------------
 
 #' Return current time as a string.
@@ -461,7 +471,7 @@ status <- synLogin(auth = auth)
 
 # read ----------------------------
 
-if (verbose) { print(glue("{now(timeOnly=T)}: reading data and mapping...")) }
+if (verbose) { print(glue("{now()}: reading data and mapping...")) }
 
 df_data <- get_synapse_entity_data_in_csv(synid_file_input, na.strings = c("NA",""))
 
@@ -470,18 +480,18 @@ df_map <- as.data.frame(synTableQuery(query, includeRowIdAndRowVersion = F))
 
 # main ----------------------------
 
-if (verbose) { print(glue("{now(timeOnly=T)}: formatting data for cBioPortal files...")) }
+if (verbose) { print(glue("{now()}: formatting data for cBioPortal files...")) }
 
 # create each data frame
 dfs <- list()
 for (sampleType in unlist(df_map %>% select(sampleType) %>% distinct())) {
-  if (verbose) { print(glue("{now(timeOnly=T)}: generating {sampleType} data frame...")) }
+  if (verbose) { print(glue("{now()}: generating {sampleType} data frame...")) }
   dfs[[sampleType]] <- create_df(df_data = df_data, df_map = df_map, sampleType = sampleType)
 }
 
 # write -----------------
 
-if (verbose) { print(glue("{now(timeOnly=T)}: writing files locally...")) }
+if (verbose) { print(glue("{now()}: writing files locally...")) }
 
 # write clinical data frames to file locally
 outfiles <- c()
@@ -507,7 +517,7 @@ outfiles["TIMELINE"] <- write_cbio_timeline(df_timeline)
 # store to synpase
 if (!is.na(synid_folder_output)) {
   
-  if (verbose) { print(glue("{now(timeOnly=T)}: storing files to Synapse in folder {synid_folder_output}...")) }
+  if (verbose) { print(glue("{now()}: storing files to Synapse in folder {synid_folder_output}...")) }
   
   for (outfile in outfiles) {
     synid_file_cbio <- save_to_synapse(path = outfile, 
