@@ -361,9 +361,10 @@ create_cna <- function(synid_file_mg, sample_ids, n_row_per_chunk = 50) {
 }
 
 create_matrix <- function(synid_file_mg, sample_ids) {
-  df_mg <- get_synapse_entity_data_in_csv(synid_file_mg, sep = "\t")
+  df_mg <- get_synapse_entity_data_in_csv(synid_file_mg, sep = "\t", na.strings = "")
   df_subset <- df_mg %>% 
     filter(is.element(SAMPLE_ID, sample_ids))
+  df_subset[which(is.na(df_subset), arr.ind = T)] <- "NA"
   return(df_subset)
 }
 
