@@ -250,7 +250,8 @@ get_mg_release_files <- function(synid_folder_mg) {
                       "cna" = as.character(synid_folder_children["data_CNA.txt"]), 
                       "matrix" = as.character(synid_folder_children["data_gene_matrix.txt"]), 
                       "fusion" = as.character(synid_folder_children["data_fusions.txt"]),
-                      "seg" = as.character(synid_folder_children["genie_data_cna_hg19.seg"]))
+                      "seg" = as.character(synid_folder_children["genie_data_cna_hg19.seg"]),
+                      "gene" = as.character(synid_folder_children["genomic_information.txt"]))
   
   return(synid_files_mg)
 }
