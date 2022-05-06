@@ -318,9 +318,9 @@ create_case_breast <- function(synid_files_cbio, cancer_study_identifier) {
     select(SAMPLE_ID))
   
   df_case <- create_case_generic(cancer_study_identifier=cancer_study_identifier, 
-                                 stable_id = glue("{cancer_study_identifier}_all"), 
-                                 case_list_name = "All samples", 
-                                 case_list_description = "All samples", 
+                                 stable_id = glue("{cancer_study_identifier}_Breast_Cancer"), 
+                                 case_list_name = "Tumor Type: Breast Cancer", 
+                                 case_list_description = "All tumors with cancer type Breast Cancer", 
                                  case_list_ids = df_sample$SAMPLE_ID)
   return(df_case)
 }

@@ -316,7 +316,10 @@ read_gene <- function(synid_files_mg, seq_assay_ids) {
   # subset gene
   str_ids <- paste0(seq_assay_ids, collapse = "','")
   query <- glue("SELECT * FROM file WHERE SEQ_ASSAY_ID IN ('{str_ids}')")
-  df_subset <- read.csv.sql(filepath, sql = query, sep = "\t")
+  df_subset <- read.csv.sql(filepath, 
+                            sql = query, 
+                            sep = "\t",
+                            colClasses = c("character",rep("integer",2), rep("character", 5)))
   
   return(df_subset)
 }

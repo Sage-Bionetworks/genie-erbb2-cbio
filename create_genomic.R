@@ -309,7 +309,7 @@ add_genie_prefix <- function(x) {
 #' 
 #' @param df_data original data frame containing all data, including sample IDs
 #' @return vector of GENIE sample IDs
-get_sample_ids <- function(df_data) {
+get_sample_ids <- function(df_data, sample_nos) {
   
   var_sample <- paste0("sample_id_", sample_nos)
   raw_ids <- as.character(unlist(sapply(var_sample, 
@@ -351,7 +351,7 @@ create_cna <- function(synid_file_mg, sample_ids, n_row_per_chunk = 50) {
   
   # subset cna in chunks
   n_row_total <- as.double(strsplit(system(glue("wc -l {filepath}"), intern = T), split = " ")[[1]][1])
-  df_subset <- matrix(NA, nrow = n_row_total - 1, ncol = length(idx), dimnames = list(c(), header_cna[idx]))
+  df_subset <- matrix("NA", nrow = n_row_total - 1, ncol = length(idx), dimnames = list(c(), header_cna[idx]))
   for (i in seq(from = 2, to = n_row_total, by = n_row_per_chunk)) {
     chunk <- matrix(scan(filepath, nlines = n_row_per_chunk, skip = i-1, what = "character", quiet = T), ncol = length(header_cna), byrow = T)[,idx]
     df_subset[(i-1):(i+nrow(chunk)-2),] <- chunk
@@ -380,7 +380,10 @@ create_seg <- function(synid_file_mg, sample_ids) {
   # subset maf
   str_ids <- paste0(sample_ids, collapse = "','")
   query <- glue("SELECT * FROM file WHERE ID IN ('{str_ids}')")
-  df_subset <- read.csv.sql(filepath, sql = query, sep = "\t")
+  df_subset <- read.csv.sql(filepath, 
+                            sql = query, 
+                            sep = "\t",
+                            colClasses = c(rep("character",2), rep("integer", 2), rep("character",2)))
   
   return(df_subset)
 }
@@ -474,7 +477,7 @@ synid_files_mg <- get_mg_release_files(synid_folder_mg)
 
 # main ----------------------------
 
-sample_ids <- get_sample_ids(df_data)
+sample_ids <- get_sample_ids(df_data, sample_nos)
 
 for (i in 1:length(filenames)) {
   
