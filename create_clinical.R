@@ -208,6 +208,18 @@ save_to_synapse <- function(path,
   return(file$properties$id)
 }
 
+#' If a string does not begin with the prefix "GENIE-", add it to
+#' the beginning of the string.
+#' 
+#' @param x string
+#' @return string with prefix "GENIE-"
+add_genie_prefix <- function(x) {
+  if (!(is.na(x) || grepl(pattern = "^GENIE-", x = x))) {
+    return(glue("GENIE-{x}"))
+  }
+  return(x)
+}
+
 get_patient_os_months <- function(df_data) {
   
   os_months <- rep(NA, nrow(df_data))
@@ -252,11 +264,27 @@ get_timeline_specimen_start_date <- function(df_data, sample_no) {
   return(start_date)
 }
 
+get_sample_sample_id <- function(df_data, sample_no) {
+  var_sample_id <- glue("sample_id_{sample_no}")
+  res <- as.character(unlist(sapply(df_data[,var_sample_id], add_genie_prefix)))
+  return(res)
+}
+
+get_timeline_specimen_sample_id <- function(df_data, sample_no) {
+  var_sample_id <- glue("sample_id_{sample_no}")
+  res <- as.character(unlist(sapply(df_data[,var_sample_id], add_genie_prefix)))
+  return(res)
+}
+
 get_fxn <- function(sampleType, cbio) {
   
   map_fxn_str <- list()
-  labels <- c("get_patient_os_months", "get_patient_os_status", 
-              "get_sample_seq_assay_id", "get_timeline_specimen_start_date")
+  labels <- c("get_patient_os_months", 
+              "get_patient_os_status", 
+              "get_sample_seq_assay_id", 
+              "get_timeline_specimen_start_date",
+              "get_sample_sample_id",
+              "get_timeline_specimen_sample_id")
   
   for (label in labels) {
     map_fxn_str[[label]] <- get(label)
