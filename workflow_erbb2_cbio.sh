@@ -7,8 +7,7 @@ Rscript uncode_redcap_export.R -e syn30042048 -d syn29880018 -o syn30041935 -f g
 Rscript create_clinical.R -i syn29990375 -m syn29989712 -o syn30041961 -v 
 Rscript create_genomic.R -i syn29990375 -g syn26706564 -o syn30041961 -v 
 Rscript create_case.R -i syn30041961 -o syn30041961 -v
-
-#Rscript create_panel.R # filename <- "panel" = "data_gene_panel_{panel_name}.txt"
+Rscript create_panel.R -i syn30041961 -g syn26706564 -o syn30041961 -v
 
 # validate using cBioPortal validator
 
