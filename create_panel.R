@@ -397,6 +397,8 @@ for (i in 1:length(seq_assay_ids)) {
                                      prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/create_panel.R")
     
     if (verbose) { print(glue("{now()}: file '{filename}' saved to {synid_file_df}.")) } 
+    
+    file.remove(filename)
   }
 }
 

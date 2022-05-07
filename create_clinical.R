@@ -554,6 +554,7 @@ if (!is.na(synid_folder_output)) {
                                       prov_desc = "GENIE ERBB2 Sponsored Project data in cBioPortal format", 
                                       prov_used = c(synid_file_input, synid_table_map), 
                                       prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/create_clinical.R")
+    file.remove(outfile)
   }
 }
 
