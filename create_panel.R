@@ -225,19 +225,33 @@ get_synapse_entity_data_in_csv <- function(synapse_id,
   return(data)
 }
 
-#' Gather main GENIE files from a designated release folder.
-#' 
-#' @param synid_folder_mg Synapse ID of main GENIE release
-#' @return named vector of Synapse IDs corresponding to labeled files. 
 get_mg_release_files <- function(synid_folder_mg) {
+  
+  synid_files_mg <- c()
+  map_mg_files <- list("maf" = c("data_mutations_extended.txt"), 
+                       "cna" = c("data_CNA.txt"), 
+                       "matrix" = c("data_gene_matrix.txt"), 
+                       "fusion" = c("data_fusions.txt"),
+                       "seg" = c("genie_data_cna_hg19.seg"),
+                       "gene" = c("genomic_information.txt", "genie_combined.bed"),
+                       "patient" = c("data_clinical_patient.txt"),
+                       "sample" = c("data_clinical_sample.txt"))
+  
   synid_folder_children <- get_synapse_folder_children(synapse_id = synid_folder_mg, 
                                                        include_types=list("file"))
-  synid_files_mg <- c("maf" = as.character(synid_folder_children["data_mutations_extended.txt"]), 
-                      "cna" = as.character(synid_folder_children["data_CNA.txt"]), 
-                      "matrix" = as.character(synid_folder_children["data_gene_matrix.txt"]), 
-                      "fusion" = as.character(synid_folder_children["data_fusions.txt"]),
-                      "seg" = as.character(synid_folder_children["genie_data_cna_hg19.seg"]),
-                      "gene" = as.character(synid_folder_children["genomic_information.txt"]))
+  
+  for (i in 1:length(map_mg_files)) {
+    
+    label <- names(map_mg_files)[i]
+    filenames <- map_mg_files[[i]]
+    
+    if (any(is.element(names(synid_folder_children), filenames))) {
+      idx <- which(is.element(names(synid_folder_children), filenames))[1]
+      synid_files_mg[label] <- as.character(synid_folder_children[idx])
+    } else {
+      synid_files_mg[label] <- NA
+    }
+  }
   
   return(synid_files_mg)
 }

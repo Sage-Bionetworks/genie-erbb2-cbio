@@ -155,15 +155,6 @@ synLogin <- function(auth = NA, silent = T) {
   return(F)
 }
 
-#' Get the name of a Synapse entity. 
-#' 
-#' @param synapse_id Synapse ID string
-#' @return String representing entity name
-#' @example get_synapse_entity_name("syn12345")
-get_synapse_entity_name <- function(synapse_id) {
-  return(synGet(synapse_id, downloadFile = F)$properties$name)
-}
-
 #' Get all child entities of a synapse folder.
 #' 
 #' @param synapse_id Synapse ID of the folder
@@ -244,14 +235,32 @@ get_synapse_entity_data_in_csv <- function(synapse_id,
 #' @param synid_folder_mg Synapse ID of main GENIE release
 #' @return named vector of Synapse IDs corresponding to labeled files. 
 get_mg_release_files <- function(synid_folder_mg) {
+  
+  synid_files_mg <- c()
+  map_mg_files <- list("maf" = c("data_mutations_extended.txt"), 
+                       "cna" = c("data_CNA.txt"), 
+                       "matrix" = c("data_gene_matrix.txt"), 
+                       "fusion" = c("data_fusions.txt"),
+                       "seg" = c("genie_data_cna_hg19.seg"),
+                       "gene" = c("genomic_information.txt", "genie_combined.bed"),
+                       "patient" = c("data_clinical_patient.txt"),
+                       "sample" = c("data_clinical_sample.txt"))
+  
   synid_folder_children <- get_synapse_folder_children(synapse_id = synid_folder_mg, 
                                                        include_types=list("file"))
-  synid_files_mg <- c("maf" = as.character(synid_folder_children["data_mutations_extended.txt"]), 
-                      "cna" = as.character(synid_folder_children["data_CNA.txt"]), 
-                      "matrix" = as.character(synid_folder_children["data_gene_matrix.txt"]), 
-                      "fusion" = as.character(synid_folder_children["data_fusions.txt"]),
-                      "seg" = as.character(synid_folder_children["genie_data_cna_hg19.seg"]),
-                      "gene" = as.character(synid_folder_children["genomic_information.txt"]))
+  
+  for (i in 1:length(map_mg_files)) {
+    
+    label <- names(map_mg_files)[i]
+    filenames <- map_mg_files[[i]]
+    
+    if (any(is.element(names(synid_folder_children), filenames))) {
+      idx <- which(is.element(names(synid_folder_children), filenames))[1]
+      synid_files_mg[label] <- as.character(synid_folder_children[idx])
+    } else {
+      synid_files_mg[label] <- NA
+    }
+  }
   
   return(synid_files_mg)
 }
@@ -293,13 +302,24 @@ save_to_synapse <- function(path,
   return(file$properties$id)
 }
 
+#' Approximately determine the number of commented header rows. For used with read.csv.sql. 
+#' 
+#' @param filepath Path to file to examine.
+#' @param n_check Number of lines to check in the file.
+#' @return number of commented lines in checked lines
+get_number_commented_header <- function(filepath, n_check = 100, comment = "#") {
+  first_rows <- scan(filepath, what = "charcter", nlines = n_check, sep = "\n", quiet = T)
+  n_skip = length(which(grepl(pattern = glue("^{comment}"), x = first_rows)))
+  return(n_skip)
+}
+
 #' If a string does not begin with the prefix "GENIE-", add it to
 #' the beginning of the string.
 #' 
 #' @param x string
 #' @return string with prefix "GENIE-"
 add_genie_prefix <- function(x) {
-  if (!grepl(pattern = "^GENIE-", x = x)) {
+  if (!(is.na(x) || grepl(pattern = "^GENIE-", x = x))) {
     return(glue("GENIE-{x}"))
   }
   return(x)
@@ -324,11 +344,15 @@ get_sample_ids <- function(df_data, sample_nos) {
 create_maf <- function(synid_file_mg, sample_ids) {
   
   filepath <- synGet(synid_file_mg)$path
+  n_skip = 0
+  
+  # check for commented headers (occurs in older releases)
+  n_skip <- get_number_commented_header(filepath) 
   
   # subset maf
   str_ids <- paste0(sample_ids, collapse = "','")
   query <- glue("SELECT * FROM file WHERE Tumor_Sample_Barcode IN ('{str_ids}')")
-  df_subset <- read.csv.sql(filepath, sql = query, sep = "\t")
+  df_subset <- read.csv.sql(filepath, sql = query, sep = "\t", skip = n_skip, colClasses = "character")
   
   # custom formatting for certain columns
   for (colname in grep(pattern = "^[nt]_", x = colnames(df_subset), value = T)) {
@@ -360,17 +384,59 @@ create_cna <- function(synid_file_mg, sample_ids, n_row_per_chunk = 50) {
   return(df_subset)
 }
 
-create_matrix <- function(synid_file_mg, sample_ids) {
-  df_mg <- get_synapse_entity_data_in_csv(synid_file_mg, sep = "\t", na.strings = "")
-  df_subset <- df_mg %>% 
-    filter(is.element(SAMPLE_ID, sample_ids))
+#' Either subset the existing matrix file or create from the maf and CNA files.
+#' 
+#' @param synid_file_mg Synapse ID of main GENIE matrix file.
+#' @param sample_ids Vector of sample IDs for which to filter
+#' @param synid_file_maf Synapse ID of main GENIE maf file.
+#' @param synid_file_cna Synapse ID of main GENIE CNA file.
+#' @param synid_file_sam Synapse ID of main GENIE clinical sample file.
+#' @return data frame representing data for matrix file for sample IDs. 
+create_matrix <- function(synid_file_mg, sample_ids, 
+                          synid_file_maf = NA, 
+                          synid_file_cna = NA,
+                          synid_file_sam = NA) {
+  
+  df_subset <- NULL
+  
+  # create new matrix file or subset existing matrix file
+  if (is.na(synid_file_mg)) {
+    df_mg_maf <- create_maf(synid_file_maf, sample_ids)
+    df_mg_cna <- create_cna(synid_file_cna, sample_ids)
+    df_mg_sam <- get_synapse_entity_data_in_csv(synid_file_sam, sep = "\t")
+    
+    maf_assay <- df_mg_maf %>% 
+      filter(is.element(Tumor_Sample_Barcode, sample_ids)) %>%
+      rename(SAMPLE_ID = Tumor_Sample_Barcode) %>%
+      select(SAMPLE_ID) %>%
+      distinct() %>%
+      left_join(df_mg_sam, by = "SAMPLE_ID") %>%
+      rename(mutations = SEQ_ASSAY_ID) %>%
+      select(SAMPLE_ID, mutations)
+    cna_assay <- data.frame(SAMPLE_ID = colnames(df_mg_cna)[2:ncol(df_mg_cna)]) %>% 
+      select(SAMPLE_ID) %>%
+      distinct() %>%
+      left_join(df_mg_sam, by = "SAMPLE_ID") %>%
+      rename(cna = SEQ_ASSAY_ID) %>%
+      select(SAMPLE_ID, cna)
+      
+    df_subset <- data.frame(SAMPLE_ID = sample_ids) %>%
+      left_join(maf_assay, by = "SAMPLE_ID") %>%
+      left_join(cna_assay, by = "SAMPLE_ID") %>%
+      filter(!is.na(mutations) | !is.na(cna))
+  } else {
+    df_mg <- get_synapse_entity_data_in_csv(synid_file_mg, sep = "\t", na.strings = "")
+    df_subset <- df_mg %>% 
+      filter(is.element(SAMPLE_ID, sample_ids))
+  }
+  
   return(df_subset)
 }
 
 create_fusion <- function(synid_file_mg, sample_ids) {
-  df_mg <- get_synapse_entity_data_in_csv(synid_file_mg, sep = "\t")
+  df_mg <- get_synapse_entity_data_in_csv(synid_file_mg, sep = "\t", na.strings = c("NA", ""))
   df_subset <- df_mg %>% 
-    filter(is.element(Tumor_Sample_Barcode, sample_ids))
+    filter(is.element(Tumor_Sample_Barcode, sample_ids) & (!is.na(Hugo_Symbol) | !is.na(Entrez_Gene_Id)))
   return(df_subset)
 }
 
@@ -388,10 +454,6 @@ create_seg <- function(synid_file_mg, sample_ids) {
   return(df_subset)
 }
 
-create_panel <- function(synid_file_mg, sample_ids) {
-  return(NULL)
-}
-
 create_df <- function(file_type, synid_files_mg, sample_ids) {
   
   df_type <- NULL
@@ -404,7 +466,10 @@ create_df <- function(file_type, synid_files_mg, sample_ids) {
                           sample_ids = sample_ids)
   } else if (file_type == "matrix") {
     df_type <- create_matrix(synid_file_mg = as.character(synid_files_mg[file_type]), 
-                             sample_ids = sample_ids)
+                             sample_ids = sample_ids, 
+                             synid_file_maf = as.character(synid_files_mg["maf"]),
+                             synid_file_cna = as.character(synid_files_mg["cna"]),
+                             synid_file_sam = as.character(synid_files_mg["sample"]))
   } else if (file_type == "fusion") {
     df_type <- create_fusion(synid_file_mg = as.character(synid_files_mg[file_type]), 
                              sample_ids = sample_ids)
