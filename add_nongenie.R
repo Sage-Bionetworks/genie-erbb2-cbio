@@ -28,14 +28,14 @@ waitifnot <- function(cond, msg) {
 option_list <- list( 
   make_option(c("-i", "--synid_folder_cbio"), type = "character",
               help="Synapse ID of folder containing cBioPortal files"),
-  make_option(c("-o", "--synid_folder_output"), type = "character",
-              help="Synapse ID of output folder"),
-  make_option(c("-s", "--synid_file_ng_sam"), type = "character", default = "syn30041987",
-              help="Synapse ID of file containing non-GENIE clinical sample info (default: syn30041987)"),
-  make_option(c("-b", "--synid_file_ng_bed"), type = "character", default = "syn30135792",
-              help="Synapse ID of file containing non-GENIE bed info  (default: syn30135792)"),
-  make_option(c("-m", "--synid_file_ng_maf"), type = "character", default = "syn30041988",
-              help="Synapse ID of file containing non-GENIE mutation info  (default: syn30041988)"),
+  make_option(c("-o", "--synid_folder_output"), type = "character", default = NA,
+              help="Synapse ID of output folder (default: write locally only)"),
+  make_option(c("-s", "--synid_file_ng_sam"), type = "character", 
+              help="Synapse ID of file containing non-GENIE clinical sample info"),
+  make_option(c("-b", "--synid_file_ng_bed"), type = "character", 
+              help="Synapse ID of file containing non-GENIE bed info"),
+  make_option(c("-m", "--synid_file_ng_maf"), type = "character",
+              help="Synapse ID of file containing non-GENIE mutation info "),
   make_option(c("-v", "--verbose"), action="store_true", default = FALSE, 
               help="Output script messages to the user."),
   make_option(c("-a", "--auth"), 
@@ -44,18 +44,40 @@ option_list <- list(
               help="Synapse personal access token or path to .synapseConfig (default: normal synapse login behavior)")
 )
 opt <- parse_args(OptionParser(option_list=option_list))
-waitifnot(!is.null(opt$synid_file_input) && !is.null(opt$synid_folder_output),
+waitifnot(!is.null(opt$synid_folder_cbio) && 
+            !is.null(opt$synid_file_ng_sam) && 
+            !is.null(opt$synid_file_ng_bed) &&
+            !is.null(opt$synid_file_ng_maf),
           msg = "Rscript add_nongenie.R -h")
 
 synid_folder_cbio <- opt$synid_folder_cbio
 synid_folder_output <- opt$synid_folder_output
-synid_file_ng_sam <- opt$synid_file_ng_sam
-synid_file_ng_bed <- opt$synid_file_ng_bed
-synid_file_ng_maf <- opt$synid_file_ng_maf
 verbose <- opt$verbose
 auth <- opt$auth
 
+synid_files_ng <- c("sample" = opt$synid_file_ng_sam,
+                    "bed" = opt$synid_file_ng_bed,
+                    "maf" = opt$synid_file_ng_maf)
+
 # functions ----------------------------
+
+#' Return current time as a string.
+#' 
+#' @param timeOnly If TRUE, return only time; otherwise return date and time
+#' @param tz Time Zone
+#' @return Time stamp as string
+#' @example 
+#' now(timeOnly = T)
+now <- function(timeOnly = F, tz = "US/Pacific") {
+  
+  Sys.setenv(TZ=tz)
+  
+  if(timeOnly) {
+    return(format(Sys.time(), "%H:%M:%S"))
+  }
+  
+  return(format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+}
 
 #' Extract personal access token from .synapseConfig
 #' located at a custom path. 
@@ -116,6 +138,15 @@ synLogin <- function(auth = NA, silent = T) {
   return(F)
 }
 
+#' Get the name of a Synapse entity. 
+#' 
+#' @param synapse_id Synapse ID string
+#' @return String representing entity name
+#' @example get_synapse_entity_name("syn12345")
+get_synapse_entity_name <- function(synapse_id) {
+  return(synGet(synapse_id, downloadFile = F)$properties$name)
+}
+
 #' Download and load data stored in csv or other delimited format on Synapse
 #' into an R data frame.
 #' 
@@ -171,6 +202,26 @@ get_synapse_folder_children <- function(synapse_id,
   return(children)
 }
 
+#' Create a new Synape Folder entity. 
+#' 
+#' @param name Name of the Synapse Folder entity
+#' @param parentId Synapse ID of Project or Folder in which to create the new Folder
+#' @return Synapse ID of the new Synapse Folder entity
+create_synapse_folder <- function(name, parent_id) {
+  
+  # check if folder already exists
+  children <- get_synapse_folder_children(parent_id, include_types = list("folder"))
+  if(is.element(name, names(children))) {
+    return(as.character(children[name]))
+  }
+  
+  concreteType <- "org.sagebionetworks.repo.model.Folder"
+  uri <- "/entity"
+  payload <- paste0("{", glue("'name':'{name}', 'parentId':'{parent_id}', 'concreteType':'{concreteType}'"), "}")
+  ent <- synRestPOST(uri = uri, body = payload)
+  return(ent$id)
+}
+
 #' Gather cBioPortal files from a designated release folder.
 #' 
 #' @param synid_folder_cbio Synapse ID of main GENIE release
@@ -190,26 +241,89 @@ get_cbio_release_files <- function(synid_folder_cbio) {
   return(synid_files_mg)
 }
 
-read_gene <- function(synid_file_gene) {
-  df_raw <- get_synapse_entity_data_in_csv(synid_file_ng_bed, sep = "\t", na.strings = c("NA",""), header = F)
-  colnames(df_raw) <- c("chr", "Start_Position", "End_Position", "label", "SEQ_ASSAY_ID")
-  df_gene <- df_raw %>%
+#' Read in the non-GENIE clinical sample file and filter for duplicates.
+#' 
+#' @param synid_file_sam Synapse ID of clinical sample file.
+#' @return Data frame representation of file's data with duplicate rows removed.
+create_merged_sample <- function(synid_file_mg, synid_file_ng) {
+  
+  df_mg <- get_synapse_entity_data_in_csv(synid_file_mg, sep = "\t", na.strings = c("NA",""))
+  df_raw <- get_synapse_entity_data_in_csv(synid_file_ng, sep = "\t", na.strings = c("NA",""))
+  df_raw <- df_raw %>%
+    distinct()
+  
+  df_mod <- df_mg %>%
+    left_join(df_raw, by = c("SAMPLE_ID", "PATIENT_ID")) %>%
+    mutate(SEQ_ASSAY_ID = case_when (!is.na(SEQ_ASSAY_ID.y) ~ SEQ_ASSAY_ID.y,
+                                     TRUE ~ SEQ_ASSAY_ID.x)) %>%
+    select(-SEQ_ASSAY_ID.x, -SEQ_ASSAY_ID.y)
+  
+  return(df_mod)
+}
+
+#' Append the non-GENIE maf file data to the GENIE maf file data
+#' for the ERBB2 samples. 
+#' 
+#' @param synid_file_mg Synapse ID of ERBB2 maf file derived from main GENIE data.
+#' @param synid_file_ng Synapse ID of ERBB2 maf file derived from non-GENIE data.
+#' @return data frame representing ERBB2 maf file for main GENIE and non-GENIE data.
+create_merged_maf <- function(synid_file_mg, synid_file_ng) {
+  
+  df_mg <- get_synapse_entity_data_in_csv(synid_file_mg, sep = "\t", na.strings = c("NA",""))
+  df_ng <- get_synapse_entity_data_in_csv(synid_file_ng, sep = "\t", na.strings = c("NA",""))
+  
+  df_maf <- df_mg %>% bind_rows(df_ng)
+  
+  # custom formatting for certain columns
+  for (colname in grep(pattern = "^[nt]_", x = colnames(df_maf), value = T)) {
+    df_maf[which(df_maf[,colname] == "."),colname] <- ""
+  }
+  df_maf[, "Validation_Status"] <- ""
+  
+  return(df_maf)
+}
+
+create_merged_matrix <- function(df_maf, df_cna, df_sam) {
+  maf_assay <- df_maf %>% 
+    rename(SAMPLE_ID = Tumor_Sample_Barcode) %>%
+    select(SAMPLE_ID) %>%
+    distinct() %>%
+    left_join(df_sam, by = "SAMPLE_ID") %>%
+    rename(mutations = SEQ_ASSAY_ID) %>%
+    select(SAMPLE_ID, mutations)
+  cna_assay <- data.frame(SAMPLE_ID = colnames(df_cna)[2:ncol(df_cna)]) %>% 
+    select(SAMPLE_ID) %>%
+    distinct() %>%
+    left_join(df_sam, by = "SAMPLE_ID") %>%
+    rename(cna = SEQ_ASSAY_ID) %>%
+    select(SAMPLE_ID, cna)
+  
+  sample_ids <- union(maf_assay$SAMPLE_ID, cna_assay$SAMPLE_ID)
+  df_matrix <- data.frame(SAMPLE_ID = sample_ids) %>%
+    left_join(maf_assay, by = "SAMPLE_ID") %>%
+    left_join(cna_assay, by = "SAMPLE_ID") %>%
+    filter(!is.na(mutations) | !is.na(cna))
+  
+  return(df_matrix)
+}
+
+#' Get SEQ ASSAY ID given that it is the first part of the file.
+#' @param synid_file_ng Synapse ID of the bed file.  
+#' @return character string matching a SEQ_ASSAY_ID in clinical sample file. 
+get_seq_assay_id <- function(synid_file_ng) {
+  filename <- get_synapse_entity_name(synid_file_ng)
+  return(gsub(x = filename, pattern = "-ASCII.bed$", replacement = ""))
+}
+
+create_nongenie_bed <- function(synid_file_ng, seq_assay_id) {
+  df_raw <- get_synapse_entity_data_in_csv(synid_file_ng, sep = "\t", na.strings = c("NA",""), header = F)
+  colnames(df_raw) <- c("chr", "Start_Position", "End_Position", "label", "unknown")
+  df_bed <- df_raw %>%
     mutate(Chromosome = gsub(chr, pattern = "chr", replacement = "")) %>%
-    mutate(ID = unlist(lapply(strsplit(x = label, split = "_"), head, n = 1))) %>%
-    select(Chromosome, Start_Position, End_Position, ID, SEQ_ASSAY_ID)
-  return(df_raw)
-}
-
-modify_sample <- function(df_mg_sam, df_ng_sam) {
-  return(NULL)
-}
-
-modify_maf <- function(df_mg_maf, df_ng_maf) {
-  return(NULL)
-}
-
-modify_matrix <- function(df_mg_matrix, df_ng_maf) {
-  return(NULL)
+    mutate(Hugo_Symbol = unlist(lapply(strsplit(x = label, split = "_"), head, n = 1))) %>%
+    mutate(SEQ_ASSAY_ID = seq_assay_id) %>%
+    select(Chromosome, Start_Position, End_Position, Hugo_Symbol, SEQ_ASSAY_ID)
+  return(df_bed)
 }
 
 create_panel_generic <- function(stable_id, description, gene_list) {
@@ -222,9 +336,9 @@ create_panel_generic <- function(stable_id, description, gene_list) {
   return(rows)
 }
 
-create_panel <- function(seq_assay_id, df_gene) {
+create_panel <- function(seq_assay_id, df_bed) {
   
-  gene_list <- as.character(unlist(df_gene %>% 
+  gene_list <- as.character(unlist(df_bed %>% 
                                      filter(SEQ_ASSAY_ID == seq_assay_id) %>%
                                      select(Hugo_Symbol) %>%
                                      distinct()))
@@ -273,42 +387,136 @@ save_to_synapse <- function(path,
   return(file$properties$id)
 }
 
+get_cbio_sample_header <- function(synid_file, nlines = 5, delim = "\t") {
+  
+  filepath <- synGet(synid_file)$path
+  header <- c()
+  
+  for (i in 1:nlines) {
+    header <- rbind(header, scan(filepath, nlines = 1, skip = i-1, what = "character", sep = "\t", quote = "", quiet = T))
+  }
+  
+  return(header)
+}
+
+write_cbio_clinical <- function(df_file, file_name, header, delim = "\t") {
+  
+  colnames(header) <- header[5,]
+  df_write <- rbind(header, df_file[colnames(header)])
+  write.table(df_write, file = file_name, sep = delim, na = "",
+              col.names = F, row.names = F, quote = F)
+  
+  return(file_name)
+}
+
+write_df <- function(df_file, filename, delim = "\t", na = "NA") {
+  write.table(df_file, row.names = F, sep = delim, file = filename, na = na, quote = F)
+  return(filename)
+}
+
+write_panel <- function(df_file, filename, delim = "\t") {
+  write.table(df_file, row.names = F, sep = delim, file = filename, na = "", quote = F, col.names = F)
+  return(filename)
+}
+
 # synapse login --------------------
 
 status <- synLogin(auth = auth)
 
 # read ----------------------------
 
-if (verbose) { print(glue("{now()}: reading non-GENIE files...")) }
-
-df_ng_sam <- get_synapse_entity_data_in_csv(synid_file_ng_sam, sep = "\t", na.strings = c("NA",""))
-df_ng_gene <- read_gene(synid_file_ng_bed)
-df_ng_maf <- get_synapse_entity_data_in_csv(synid_file_ng_maf, sep = "\t", na.strings = c("NA",""))
-
-if (verbose) { print(glue("{now()}: gathering GENIE cBioPortal files from '{get_synapse_entity_name(synid_folder_cbio)}' ({synid_folder_cbio})...")) }
+if (verbose) { print(glue("{now()}: gathering new cBioPortal files from '{get_synapse_entity_name(synid_folder_cbio)}' ({synid_folder_cbio})...")) }
 synid_files_cbio <- get_cbio_release_files(synid_folder_cbio)
-
-if (verbose) { print(glue("{now()}: reading relevant GENIE cBioPortal files...")) }
-df_mg_sam <- get_synapse_entity_data_in_csv(synid_files_cbio["sample"], sep = "\t")
-df_mg_maf <- get_synapse_entity_data_in_csv(synid_files_cbio["maf"], sep = "\t")
-df_mg_matrix <- get_synapse_entity_data_in_csv(synid_files_cbio["maf"], sep = "\t")
 
 # main ----------------------------
 
-# modify clinical sample, maf, gene matrix files
-df_sam <- modify_sample(df_mg_sam = df_mg_sam, df_ng_sam = df_ng_sam)
-df_sam <- modify_maf(df_mg_maf = df_mg_maf, df_ng_maf = df_ng_maf)
-df_sam <- modify_matrix(df_mg_matrix = df_mg_matrix, df_ng_maf = df_ng_maf)
+dfs <- list()
+
+if (verbose) { print(glue("{now()}: merging non-GENIE sample info...")) }
+
+dfs[["sample"]] <- create_merged_sample(synid_file_mg = as.character(synid_files_cbio["sample"]),
+                               synid_file_ng = as.character(synid_files_ng["sample"]))
+
+if (verbose) { print(glue("{now()}: merging non-GENIE maf file...")) }
+
+dfs[["maf"]] <- create_merged_maf(synid_file_mg = as.character(synid_files_cbio["maf"]),
+                               synid_file_ng = as.character(synid_files_ng["maf"]))
+
+if (verbose) { print(glue("{now()}: merging non-GENIE matrix info...")) }
+
+df_cna <- get_synapse_entity_data_in_csv(as.character(synid_files_cbio["cna"]), sep = "\t", na.strings = c("NA",""))
+dfs[["matrix"]] <- create_merged_matrix(df_maf = dfs[["maf"]], 
+                                  df_cna = df_cna, 
+                                  df_sam = dfs[["sample"]])
+
+if (verbose) { print(glue("{now()}: creating non-GENIE panel file...")) }
 
 # create new gene panel files
-df_gene <- create_panel(seq_assay_id, df_gene)
+seq_assay_id <- get_seq_assay_id(as.character(synid_files_ng["bed"]))
+df_bed <- create_nongenie_bed(synid_file_ng = as.character(synid_files_ng["bed"]), 
+                                seq_assay_id = seq_assay_id)
+dfs[["panel"]] <- create_panel(seq_assay_id, df_bed)
+
+# write ---------------------
+
+if (verbose) { print(glue("{now()}: writing files locally...")) }
 
 # write modified files locally
+outfiles <- c()
+for (file_type in setdiff(names(dfs), "panel")) {
+  
+  if (file_type == "panel") {
+    outfiles[file_type] <- write_panel(df_file = df_panel, filename = glue("data_gene_panel_{seq_assay_id}.txt"))
+  } else if (file_type == "sample") {
+    entity <- synGet(as.character(synid_files_cbio[[file_type]]))
+    file_name <- entity$properties$name
+    header <- get_cbio_sample_header(entity$properties$id)
+    
+    outfiles[file_type] <- write_cbio_clinical(df_file = dfs[[file_type]], 
+                                               file_name = file_name, 
+                                               header = header)
+  } else if (file_type == "maf") {
+    outfiles[file_type] <- write_df(df_file = dfs[[file_type]], 
+                                    filename = get_synapse_entity_name(as.character(synid_files_cbio[[file_type]])), na = "")
+  } else {
+    outfiles[file_type] <- write_df(df_file = dfs[[file_type]], 
+                                    filename = get_synapse_entity_name(as.character(synid_files_cbio[[file_type]])))
+  }
+}
 
-# if storing to synapse
-#   copy GENIE cBioPortal entities to new folder
-#   save modified files to synapse
-#   remove local versions
+# store ---------------------
+
+# if requested, store to synapse
+if (!is.na(synid_folder_output)) {
+  for (file_type in names(outfiles)) {
+    
+    synid_folder_dest <- ""
+    if (file_type == "panel") {
+      synid_folder_dest <- create_synapse_folder(name = "gene_panels", parent_id = synid_folder_output)
+      used <- c(synid_files_ng["bed"])
+    } else {
+      synid_folder_dest <- synid_folder_output
+      if (!is.na(synid_files_ng[file_type])) {
+        used <- c(synid_files_cbio[file_type], synid_files_ng[file_type])
+      } else {
+        used <- c(synid_files_cbio[file_type])
+      }
+    }
+    
+    if (verbose) { print(glue("{now()}: saving '{outfiles[file_type]}' to Synapse folder '{get_synapse_entity_name(synid_folder_dest)}' ({synid_folder_dest})...")) }
+    
+    synid_file_df <- save_to_synapse(path = as.character(outfiles[file_type]), 
+                                     parent_id = synid_folder_dest, 
+                                     prov_name = "ERBB2 cBioPortal file plus", 
+                                     prov_desc = "GENIE ERBB2 Sponsored Project data in cBioPortal format with non-GENIE data", 
+                                     prov_used = as.character(used), 
+                                     prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/add_nongenie.R")
+    
+    if (verbose) { print(glue("{now()}: file '{outfiles[file_type]}' saved to {synid_file_df}.")) } 
+    
+    file.remove(outfiles[file_type])
+  }
+}
 
 # close out ----------------------------
 
