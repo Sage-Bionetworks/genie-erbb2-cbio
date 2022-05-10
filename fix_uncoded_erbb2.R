@@ -33,7 +33,7 @@ waitifnot <- function(cond, msg) {
 option_list <- list( 
   make_option(c("-i", "--synid_file_input"), type = "character",
               help="Synapse ID of input file"),
-  make_option(c("-o", "--synid_folder_output"), type = "character",
+  make_option(c("-o", "--synid_folder_output"), type = "character", default = NA,
               help="Synapse ID of output folder"),
   make_option(c("-f", "--file_name"), type = "character", default = "fixed.csv", 
               help="Name of the output file (default: 'fixed.csv')"),
@@ -250,7 +250,7 @@ for (sample_no in sample_nos) {
 
 # write --------------------
 
-write.csv(x = df_fix, file = file_output, row.names = F, na = "")
+write.csv(x = df_fix, file = file_output, row.names = F, na = "", quote = F)
 
 if (!is.na(synid_folder_output)) {
   
