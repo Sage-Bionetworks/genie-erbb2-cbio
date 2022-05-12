@@ -1,4 +1,4 @@
-# Description: Custom fixes to the supplemental maf file for ERBB2 update.
+# Description: Custom fixes and additions to the supplemental maf file for ERBB2 update.
 # Author: Haley Hunter-Zinck
 # Date: 2022-05-09
 
@@ -28,12 +28,14 @@ waitifnot <- function(cond, msg) {
 option_list <- list( 
   make_option(c("-i", "--synid_file_input"), type = "character",
               help="Synapse ID of input file"),
+  make_option(c("-s", "--synid_file_input2"), type = "character", default = NA,
+              help="Synapse ID of secondary input file (default: NA)"),
   make_option(c("-o", "--synid_folder_output"), type = "character", default = NA,
-              help="Synapse ID of output folder"),
+              help="Synapse ID of output folder (default: NA, write locally)"),
   make_option(c("-f", "--file_name"), type = "character", default = "fixed.csv", 
               help="Name of the output file (default: 'fixed.csv')"),
   make_option(c("-v", "--verbose"), action="store_true", default = FALSE, 
-              help="Output script messages to the user."),
+              help="Output script messages to the user. (default: FALSE)"),
   make_option(c("-a", "--auth"), 
               type = "character",
               default = NA,
@@ -44,6 +46,7 @@ waitifnot(!is.null(opt$synid_file_input),
           msg = "Rscript fix_supp_maf_erbb2.R -h")
 
 synid_file_input <- opt$synid_file_input
+synid_file_input2 <- opt$synid_file_input2
 synid_folder_output <- opt$synid_folder_output
 file_output <- opt$file_name
 verbose <- opt$verbose
@@ -207,13 +210,22 @@ status <- synLogin(auth = auth)
 
 df_raw <- get_synapse_entity_data_in_csv(synid_file_input, sep = "\t", na.strings = c("", "NA"))
 
+if (!is.na(synid_file_input2)) {
+  df_raw2 <- get_synapse_entity_data_in_csv(synid_file_input2, sep = "\t", na.strings = c("", "NA"))
+}
+
 # main ----------------------------
 
 df_fix <- df_raw %>%
   rename(Reference_Allele = REFERENCE_ALLELE) %>%
   rename(Tumor_seq_Allele1 = TUMOR_SEQ_ALLELE1) %>%
-  mutate(End_Position = as.double(Start_Position) + nchar(Reference_Allele) - 1) %>%
+  mutate(End_Position = as.character(as.double(Start_Position) + nchar(Reference_Allele) - 1)) %>%
   select(Chromosome, Start_Position, End_Position, Reference_Allele, Tumor_seq_Allele1, Tumor_Sample_Barcode)
+
+if (!is.na(synid_file_input2)) {
+  df_fix <- df_fix %>%
+    bind_rows(df_raw2)
+}
 
 # write --------------------
 
@@ -225,11 +237,16 @@ if (!is.na(synid_folder_output)) {
     print(glue("{now(timeOnly = T)}: Saving fixed pre-annotation file to Synapse..."))
   }
   
+  used <- c(synid_file_input)
+  if (!is.na(synid_file_input2)) {
+    used <- append(used, synid_file_input2)
+  }
+  
   synid_file_output <- save_to_synapse(path = file_output,
                                        parent_id = synid_folder_output,
                                        prov_name = "Fixed ERBB2 supp maf",
                                        prov_desc = "ERBB2 supplementatl mutation file with custom fixes prior to annotation with Genome Nexus",
-                                       prov_used = c(synid_file_input),
+                                       prov_used = used,
                                        prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/main/fix_supp_maf_erbb2.R")
   
   # clean up locally
