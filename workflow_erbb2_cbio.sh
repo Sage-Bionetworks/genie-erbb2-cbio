@@ -64,7 +64,7 @@ python $HOME/cbioportal/core/src/main/scripts/importer/validateData.py -s erbb2/
 # annotate additional genomic data
 Rscript fix_supp_maf_erbb2.R -i $synid_file_ng_maf -o $synid_folder_staging -f $file_pre -v
 synapse get $synid_file_ng_maf_pre 
-java -jar annotationPipeline/target/annotationPipeline-*.jar \
+java -jar ../genome-nexus-annotation-pipeline/annotationPipeline/target/annotationPipeline-*.jar \
     -r \
     --filename $file_pre  \
     --output-filename  \
