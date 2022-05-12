@@ -252,3 +252,16 @@ get_cbio_release_files <- function(synid_folder_cbio) {
   return(synid_files_mg)
 }
 
+#' If a string does not begin with the prefix "GENIE-", add it to
+#' the beginning of the string.
+#' 
+#' @param x string
+#' @return string with prefix "GENIE-"
+add_genie_prefix <- function(x) {
+  if (!(is.na(x) || grepl(pattern = "^GENIE-", x = x))) {
+    return(glue("GENIE-{x}"))
+  }
+  return(x)
+}
+
+
