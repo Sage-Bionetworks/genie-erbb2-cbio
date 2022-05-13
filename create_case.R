@@ -1,5 +1,6 @@
 # Description: Create case files for ERBB2 cBioPortal files. 
-# Format: https://docs.cbioportal.org/file-formats/#case-lists
+# Format: 
+# - https://docs.cbioportal.org/file-formats/#case-lists
 # Author: Haley Hunter-Zinck
 # Date: 2022-05-05
 

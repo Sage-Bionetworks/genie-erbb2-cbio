@@ -1,5 +1,8 @@
 # Description: Transform uncoded ERBB2 REDCap export to cBioPortal format
 #               to create patients, sample, and timeline files. 
+# Format: 
+# - https://docs.cbioportal.org/file-formats/#clinical-data
+# - https://docs.cbioportal.org/file-formats/#timeline-data
 # Author: Haley Hunter-Zinck
 # Date: 2022-04-29
 

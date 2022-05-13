@@ -1,5 +1,11 @@
 # Description: Create cBioPortal genomic information files using a sample ID list
 #     and a main GENIE release from which to draw data. 
+# Format: 
+# - https://docs.cbioportal.org/file-formats/#mutation-data
+# - https://docs.cbioportal.org/file-formats/#discrete-copy-number-data
+# - https://docs.cbioportal.org/file-formats/#gene-panel-matrix-file
+# - https://docs.cbioportal.org/file-formats/#fusion-data
+# - https://docs.cbioportal.org/file-formats/#segmented-data
 # Author: Haley Hunter-Zinck
 # Date: 2022-05-03
 
