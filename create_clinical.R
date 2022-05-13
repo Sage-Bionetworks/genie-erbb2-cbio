@@ -1,5 +1,8 @@
 # Description: Transform uncoded ERBB2 REDCap export to cBioPortal format
 #               to create patients, sample, and timeline files. 
+# Format: 
+# - https://docs.cbioportal.org/file-formats/#clinical-data
+# - https://docs.cbioportal.org/file-formats/#timeline-data
 # Author: Haley Hunter-Zinck
 # Date: 2022-04-29
 
@@ -11,18 +14,7 @@ library(glue)
 library(dplyr)
 library(synapser)
 library(optparse)
-
-waitifnot <- function(cond, msg) {
-  if (!cond) {
-    
-    for (str in msg) {
-      message(str)
-    }
-    message("Press control-C to exit and try again.")
-    
-    while(T) {}
-  }
-}
+source("shared_fxns.R")
 
 # user input ----------------------------
 
@@ -60,166 +52,12 @@ if (verbose) {
 
 # functions ----------------------------
 
-#' Return current time as a string.
+#' ETL_OPERATION function to calculate overall survival in months.
+#' sampleType: PATIENT
+#' cbio: OS_MONTHS
 #' 
-#' @param timeOnly If TRUE, return only time; otherwise return date and time
-#' @param tz Time Zone
-#' @return Time stamp as string
-#' @example 
-#' now(timeOnly = T)
-now <- function(timeOnly = F, tz = "US/Pacific") {
-  
-  Sys.setenv(TZ=tz)
-  
-  if(timeOnly) {
-    return(format(Sys.time(), "%H:%M:%S"))
-  }
-  
-  return(format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
-}
-
-#' Extract personal access token from .synapseConfig
-#' located at a custom path. 
-#' 
-#' @param path Path to .synapseConfig
-#' @return personal acccess token
-get_auth_token <- function(path) {
-  
-  lines <- scan(path, what = "character", sep = "\t", quiet = T)
-  line <- grep(pattern = "^authtoken = ", x = lines, value = T)
-  
-  token <- strsplit(line, split = ' ')[[1]][3]
-  return(token)
-}
-
-#' Override of synapser::synLogin() function to accept 
-#' custom path to .synapseConfig file or personal authentication
-#' token.  If no arguments are supplied, performs standard synLogin().
-#' 
-#' @param auth full path to .synapseConfig file or authentication token
-#' @param silent verbosity control on login
-#' @return TRUE for successful login; F otherwise
-synLogin <- function(auth = NA, silent = T) {
-  
-  secret <- Sys.getenv("SCHEDULED_JOB_SECRETS")
-  if (secret != "") {
-    # Synapse token stored as secret in json string
-    syn = synapser::synLogin(silent = T, authToken = fromJSON(secret)$SYNAPSE_AUTH_TOKEN)
-  } else if (auth == "~/.synapseConfig" || is.na(auth)) {
-    # default Synapse behavior
-    syn <- synapser::synLogin(silent = silent)
-  } else {
-    
-    # in case pat passed directly
-    token <- auth
-    
-    # extract token from custom path to .synapseConfig
-    if (grepl(x = auth, pattern = "\\.synapseConfig$")) {
-      token = get_auth_token(auth)
-      
-      if (is.na(token)) {
-        return(F)
-      }
-    }
-    
-    # login with token
-    syn <- tryCatch({
-      synapser::synLogin(authToken = token, silent = silent)
-    }, error = function(cond) {
-      return(F)
-    })
-  }
-  
-  # NULL returned indicates successful login
-  if (is.null(syn)) {
-    return(T)
-  }
-  return(F)
-}
-
-#' Download and load data stored in csv or other delimited format on Synapse
-#' into an R data frame.
-#' 
-#' @param synapse_id Synapse ID
-#' @version Version of the Synapse entity to download.  NA will load current
-#' version
-#' @param set Delimiter for file
-#' @param na.strings Vector of strings to be read in as NA values
-#' @param header TRUE if the file contains a header row; FALSE otherwise.
-#' @param check_names TRUE if column names should be modified for compatibility 
-#' with R upon reading; FALSE otherwise.
-#' @param comment.char character designating comment lines to ignore
-#' @return data frame
-get_synapse_entity_data_in_csv <- function(synapse_id, 
-                                           version = NA,
-                                           sep = ",", 
-                                           na.strings = c("NA"), 
-                                           header = T,
-                                           check_names = F,
-                                           comment.char = "#",
-                                           colClasses = "character") {
-  
-  if (is.na(version)) {
-    entity <- synGet(synapse_id)
-  } else {
-    entity <- synGet(synapse_id, version = version)
-  }
-  
-  data <- read.csv(entity$path, stringsAsFactors = F, 
-                   na.strings = na.strings, sep = sep, check.names = check_names,
-                   header = header, comment.char = comment.char, colClasses = colClasses)
-  return(data)
-}
-
-#' Store a file on Synapse with options to define provenance.
-#' 
-#' @param path Path to the file on the local machine.
-#' @param parent_id Synapse ID of the folder or project to which to load the file.
-#' @param file_name Name of the Synapse entity once loaded
-#' @param prov_name Provenance short description title
-#' @param prov_desc Provenance long description
-#' @param prov_used Vector of Synapse IDs of data used to create the current
-#' file to be loaded.
-#' @param prov_exec String representing URL to script used to create the file.
-#' @return Synapse ID of entity representing file
-save_to_synapse <- function(path, 
-                            parent_id, 
-                            file_name = NA, 
-                            prov_name = NA, 
-                            prov_desc = NA, 
-                            prov_used = NA, 
-                            prov_exec = NA) {
-  
-  if (is.na(file_name)) {
-    file_name = path
-  } 
-  file <- File(path = path, parentId = parent_id, name = file_name)
-  
-  if (!is.na(prov_name) || !is.na(prov_desc) || !is.na(prov_used) || !is.na(prov_exec)) {
-    act <- Activity(name = prov_name,
-                    description = prov_desc,
-                    used = prov_used,
-                    executed = prov_exec)
-    file <- synStore(file, activity = act)
-  } else {
-    file <- synStore(file)
-  }
-  
-  return(file$properties$id)
-}
-
-#' If a string does not begin with the prefix "GENIE-", add it to
-#' the beginning of the string.
-#' 
-#' @param x string
-#' @return string with prefix "GENIE-"
-add_genie_prefix <- function(x) {
-  if (!(is.na(x) || grepl(pattern = "^GENIE-", x = x))) {
-    return(glue("GENIE-{x}"))
-  }
-  return(x)
-}
-
+#' @param df_data data frame representing the raw dataset.
+#' @return vector of integers 
 get_patient_os_months <- function(df_data) {
   
   os_months <- rep(NA, nrow(df_data))
@@ -228,6 +66,12 @@ get_patient_os_months <- function(df_data) {
   return(os_months)
 }
 
+#' ETL_OPERATION function to generate overall patient survival status.
+#' sampleType: PATIENT
+#' cbio: OS_STATUS
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @return vector of strings
 get_patient_os_status <- function(df_data) {
   
   os_status <- df_data$vital_status
@@ -236,6 +80,14 @@ get_patient_os_status <- function(df_data) {
   return(os_status)
 }
 
+#' ETL_OPERATION function to query the panel sequencing assay ID for a sample.
+#' sampleType: SAMPLE
+#' cbio: SEQ_ASSAY_ID
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param sample_no integer representing numeric index of the sample.
+#' @param synid_table_assay string representing Synapse ID of reference table with sample sequencing assay ID information.
+#' @return vector of strings
 get_sample_seq_assay_id <- function(df_data, sample_no, synid_table_assay = "syn7517674") {
   
   
@@ -251,6 +103,13 @@ get_sample_seq_assay_id <- function(df_data, sample_no, synid_table_assay = "syn
   return(unlist(df_data_assay))
 }
 
+#' ETL_OPERATION function to calculate sample specimen start date.
+#' sampleType: TIMELINE-SPECIMEN
+#' cbio: START_DATE
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param sample_no integer representing numeric index of the sample.
+#' @return vector of integers
 get_timeline_specimen_start_date <- function(df_data, sample_no) {
   
   start_date <- rep(NA, nrow(df_data))
@@ -264,18 +123,37 @@ get_timeline_specimen_start_date <- function(df_data, sample_no) {
   return(start_date)
 }
 
+#' ETL_OPERATION function to format sample IDs for GENIE for sample file.
+#' sampleType: SAMPLE
+#' cbio: SAMPLE_ID
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param sample_no integer representing numeric index of the sample.
+#' @return vector of strings
 get_sample_sample_id <- function(df_data, sample_no) {
   var_sample_id <- glue("sample_id_{sample_no}")
   res <- as.character(unlist(sapply(df_data[,var_sample_id], add_genie_prefix)))
   return(res)
 }
 
+#' ETL_OPERATION function to calculate format SAMPLE IDs for GENIE for timeline file.
+#' sampleType: TIMELINE-SPECIMEN
+#' cbio: SAMPLE_ID
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param sample_no integer representing numeric index of the sample.
+#' @return vector of strings
 get_timeline_specimen_sample_id <- function(df_data, sample_no) {
   var_sample_id <- glue("sample_id_{sample_no}")
   res <- as.character(unlist(sapply(df_data[,var_sample_id], add_genie_prefix)))
   return(res)
 }
 
+#' Map function names to implementations.
+#' 
+#' @param sampleType string representing cBio sample type
+#' @param cbio string representing cbio variable name
+#' @return object representing function
 get_fxn <- function(sampleType, cbio) {
   
   map_fxn_str <- list()
@@ -293,6 +171,11 @@ get_fxn <- function(sampleType, cbio) {
   return(map_fxn_str[[glue("get_{tolower(gsub('-', '_', sampleType))}_{tolower(cbio)}")]])
 }
 
+#' Remove rows from a data frame with a missing primary key.
+#' 
+#' @param df_cbio data frame 
+#' @param primary_key column name on which to remove if NA
+#' @return data frame with rows removed
 filter_empty_rows <- function(df_cbio, primary_key) {
   idx_rm <- which(is.na(df_cbio[primary_key]))
   if (length(idx_rm)) {
@@ -301,6 +184,11 @@ filter_empty_rows <- function(df_cbio, primary_key) {
   return(df_cbio)
 }
 
+#' Remove rows from a data frame with a start date.
+#' 
+#' @param df_cbio data frame 
+#' @param col_name column name on which to remove if NA
+#' @return data frame with rows removed
 filter_null_start_date <- function(df_cbio, col_start = "START_DATE") {
   idx_rm <- which(is.na(df_cbio[col_start]))
   if (length(idx_rm)) {
@@ -309,6 +197,13 @@ filter_null_start_date <- function(df_cbio, col_start = "START_DATE") {
   return(df_cbio)
 }
 
+#' Create data frame with patient cBioPortal data.
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param cbio vector of string representing cbio variable name.
+#' @param code parallel vector of strings representing variable name in the raw data.
+#' @param instructions instructions for cbio variable generation, if applicable.
+#' @return data frame representing cBioPortal patient data
 create_patient <- function(df_data, cbio, code, instructions = NULL) {
   
   mat <- matrix(NA, nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
@@ -325,6 +220,14 @@ create_patient <- function(df_data, cbio, code, instructions = NULL) {
   return(data.frame(mat))
 }
 
+#' Create data frame with sample cBioPortal data.
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param cbio vector of string representing cbio variable name
+#' @param code parallel vector of strings representing variable name in the raw data
+#' @param instructions instructions for cbio variable generation, if applicable
+#' @param sample_nos vector of integers representing sample indexes
+#' @return data frame representing cBioPortal sample data
 create_sample <- function(df_data, cbio, code, instructions = NULL, sample_nos = c(1:10)) {
   
   mat <- matrix(nrow = 0, ncol = length(cbio), dimnames = list(c(), cbio))
@@ -353,6 +256,15 @@ create_sample <- function(df_data, cbio, code, instructions = NULL, sample_nos =
   return(df_final)
 }
 
+#' Create data frame with timeline-treatment cBioPortal data.
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param cbio vector of string representing cbio variable name
+#' @param code parallel vector of strings representing variable name in the raw data
+#' @param instructions instructions for cbio variable generation, if applicable
+#' @param therapy_nos vector of integers representing therapy indexes
+#' @param drug_nos vector of integers representing drug indexes
+#' @return data frame representing cBioPortal timeline-treatment data
 create_timeline_treatment <- function(df_data, cbio, code, instructions, 
                                       therapy_nos = c(1:25), drug_nos = c(1:5)) {
   
@@ -387,6 +299,14 @@ create_timeline_treatment <- function(df_data, cbio, code, instructions,
   return(df_final)
 }
 
+#' Create data frame with timeline-specimen cBioPortal data.
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param cbio vector of string representing cbio variable name
+#' @param code parallel vector of strings representing variable name in the raw data
+#' @param instructions instructions for cbio variable generation, if applicable
+#' @param sample_nos vector of integers representing sample indexes
+#' @return data frame representing cBioPortal timeline-specimen data
 create_timeline_specimen <- function(df_data, cbio, code, instructions, sample_nos = c(1:10)) {
   mat <- matrix(nrow = 0, ncol = length(cbio), dimnames = list(c(), cbio))
   
@@ -416,6 +336,14 @@ create_timeline_specimen <- function(df_data, cbio, code, instructions, sample_n
   return(df_final)
 }
 
+#' Create data frame with timeline-status cBioPortal data.
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param cbio vector of string representing cbio variable name
+#' @param code parallel vector of strings representing variable name in the raw data
+#' @param instructions instructions for cbio variable generation, if applicable
+#' @param sample_nos vector of integers representing sample indexes
+#' @return data frame representing cBioPortal timeline-status data
 create_timeline_status <- function(df_data, cbio, code, instructions) {
   mat <- matrix(NA, nrow = nrow(df_data), ncol = length(cbio), dimnames = list(c(), cbio))
   
@@ -432,6 +360,12 @@ create_timeline_status <- function(df_data, cbio, code, instructions) {
   return(df_final)
 }
 
+#' Create a data frame for the requested cBioPortal file dataset.
+#' 
+#' @param df_data data frame representing the raw dataset.
+#' @param df_map data frame representing the mapping table
+#' @param sampleType string representing the cBioPortal sample type
+#' @return data frame representing the requested dataset
 create_df <- function(df_data, df_map, sampleType) {
   
   df_cbio_type <- NULL
@@ -459,6 +393,12 @@ create_df <- function(df_data, df_map, sampleType) {
   return(df_cbio_type)
 }
 
+#' Create the custom header for cBioPortal clinical files.
+#' 
+#' @param df data frame representing clinical dataset
+#' @param label vector of string representing a short label for each column in the dataset
+#' @param description vector of string representing a long descriptions for each column in the dataset
+#' @param colType vector of string representing the data type of each column in the dataset
 create_cbio_clinical_header <- function(df, label, description, colType) {
   header <- rbind(label, description, colType, rep(1))
   header <- t(apply(header, 1, function(x) {return(c(paste0("#", x[1]), x[2:length(x)]))}))
@@ -468,12 +408,25 @@ create_cbio_clinical_header <- function(df, label, description, colType) {
   return(header)
 }
 
-get_cbio_filename <- function(file_type) {
+#' Get cBioPortal clinical file name based on file type.
+#' 
+#' @param sampleType string representing cBioPortal sample type.  
+#' @return string
+get_cbio_filename <- function(sampleType) {
   mapping <- setNames(c("data_clinical_sample.txt", "data_clinical_patient.txt", "data_timeline.txt"),
                       c("SAMPLE", "PATIENT", "TIMELINE"))
-  return(mapping[file_type])
+  return(mapping[sampleType])
 }
 
+#' Write cBioPortal clinical file. 
+#' 
+#' @param df data frame representing clinical dataset.
+#' @param label vector of string representing a short label for each column in the dataset.
+#' @param description vector of string representing a long descriptions for each column in the dataset.
+#' @param colType vector of string representing the data type of each column in the dataset.
+#' @param sampleType string representing cBioPortal sample type.
+#' @param delim character representing delimiter used in writing to file
+#' @return file name of ouptut file
 write_cbio_clinical <- function(df, label, description, colType, sampleType, delim = "\t") {
   
   filename <- get_cbio_filename(sampleType)
@@ -486,6 +439,10 @@ write_cbio_clinical <- function(df, label, description, colType, sampleType, del
   return(filename)
 }
 
+#' Write cBioPortal timeline file. 
+#' 
+#' @param df data frame representing clinical dataset.
+#' @return file name of ouptut file
 write_cbio_timeline <- function(df, delim = "\t") {
   filename <- get_cbio_filename("TIMELINE")
   write.table(df, file = filename, sep = delim, na = "",
