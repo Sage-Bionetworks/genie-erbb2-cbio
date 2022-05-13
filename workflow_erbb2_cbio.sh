@@ -9,8 +9,8 @@
 # file names
 file_raw=genie_erbb2_uncoded_raw.csv
 file_fix=genie_erbb2_uncoded_fixed.csv
-file_pre=nonGENIE_data_mutations_extended_GRCC_preann.txt
-file_ann=nonGENIE_data_mutations_extended_GRCC_ann.txt
+file_pre=nonGENIE_data_mutations_extended_GRCC_UHN_preann.txt
+file_ann=nonGENIE_data_mutations_extended_GRCC_UHN_ann.txt
 
 # files
 synid_file_uncoded_raw=syn30257223
@@ -20,8 +20,9 @@ synid_file_uncoded=syn29990375
 synid_file_ng_sam=syn30041987
 synid_file_ng_bed=syn30135792
 synid_file_ng_maf=syn30041988
-synid_file_ng_maf_pre=syn30269197
-synid_file_ng_maf_ann=syn30269594
+synid_file_ng_maf2=syn30394472
+synid_file_ng_maf_pre=syn30394657
+synid_file_ng_maf_ann=syn30396139
 
 # tables
 synid_table_map=syn29989712
@@ -62,15 +63,16 @@ python $HOME/cbioportal/core/src/main/scripts/importer/validateData.py -s erbb2/
 #########################
 
 # annotate additional genomic data
-Rscript fix_supp_maf_erbb2.R -i $synid_file_ng_maf -o $synid_folder_staging -f $file_pre -v
+Rscript fix_supp_maf_erbb2.R -i $synid_file_ng_maf -s $synid_file_ng_maf2 -o $synid_folder_staging -f $file_pre -v
 synapse get $synid_file_ng_maf_pre 
 java -jar ../genome-nexus-annotation-pipeline/annotationPipeline/target/annotationPipeline-*.jar \
     -r \
     --filename $file_pre  \
-    --output-filename  \
+    --output-filename $file_ann \
     --isoform-override uniprot \
     --post-interval-size 1000
 synapse store --parentid $synid_folder_staging $file_ann
+rm $file_pre $file_ann
 
 # copy, modify, and upload
 synapse cp --updateExisting --destinationId $synid_folder_update $synid_folder_cbio_staging
