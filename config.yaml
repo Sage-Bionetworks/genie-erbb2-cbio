@@ -1,0 +1,22 @@
+cbioportal:
+  data: 
+    maf: data_mutations_extended.txt
+    cna: data_cna.txt
+    fusion: data_fusions.txt
+    seg: genie_data_cna_hg19_seg.txt
+    patient: data_clinical_patient.txt
+    sample: data_clinical_sample.txt
+    timeline: data_timeline.txt
+    matrix: data_gene_matrix.txt
+  meta:
+    study: meta_study.txt
+range:
+  sample_no:
+    min: 1
+    max: 10
+  therapy_no:
+    min: 1
+    max: 25
+  drug_no:
+    min: 1
+    max: 5

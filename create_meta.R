@@ -8,21 +8,13 @@
 tic = as.double(Sys.time())
 
 library(glue)
+library(yaml)
 library(dplyr)
 library(synapser)
 library(optparse)
 source("shared_fxns.R")
 
-# constants
-filenames <- c("seg" = "genie_erbb2_meta_cna_hg19_seg.txt",
-               "cna" = "meta_CNA.txt",
-               "patient" = "meta_clinical_patient.txt", 
-               "sample" = "meta_clinical_sample.txt", 
-               "fusion" = "meta_fusions.txt", 
-               "matrix" = "meta_gene_matrix.txt", 
-               "maf" = "meta_mutations_extended.txt",
-               "study" = "meta_study.txt",
-               "timeline" = "meta_timeline.txt")
+config <- read_yaml("config.yaml")
 
 # user input ----------------------------
 
@@ -31,6 +23,14 @@ option_list <- list(
               help="Synapse ID of input file"),
   make_option(c("-o", "--synid_folder_output"), type = "character",
               help="Synapse ID of output folder"),
+  make_option(c("-c", "--cancer_study_identifier"), type = "character", default = "genie_erbb2",
+              help="Study identifier for labeling cBioPortal files"),
+  make_option(c("-n", "--name"), type = "character", default = "GENIE ERBB2 Sponsored Project",
+              help="Study name"),
+  make_option(c("-s", "--short_name"), type = "character", default = "ERBB2",
+              help="Study short name"),
+  make_option(c("-d", "--description"), type = "character", default = "GENIE ERBB2 Sponsored Project",
+              help="Study description"),
   make_option(c("-v", "--verbose"), action="store_true", default = FALSE, 
               help="Output script messages to the user."),
   make_option(c("-a", "--auth"), 
@@ -44,6 +44,10 @@ waitifnot(!is.null(opt$synid_file_input) && !is.null(opt$synid_folder_output),
 
 synid_file_input <- opt$synid_file_input
 synid_folder_output <- opt$synid_folder_output
+cancer_study_identifier <- opt$cancer_study_identifier
+name <- opt$name
+short_name <- opt$short_name
+description <- opt$description
 verbose <- opt$verbose
 auth <- opt$auth
 
@@ -74,7 +78,7 @@ create_meta_genomic_generic <- function(cancer_study_identifier, genetic_alterat
 }
 
 create_meta_seg_generic <- function(cancer_study_identifier, genetic_alteration_type, datatype, reference_genome_id, description, data_filename) {
-  rows <- rep(NA, )
+  rows <- rep(NA, 6)
   rows[1] <- glue("cancer_study_identifier: {cancer_study_identifier}")
   rows[2] <- glue("genetic_alteration_type: {genetic_alteration_type}")
   rows[3] <- glue("datatype: {datatype}")
@@ -151,7 +155,7 @@ create_meta_fusion <- function(cancer_study_identifier, data_filename = "data_CN
 }
 
 
-create_meta_maf <- function() {
+create_meta_maf <- function(cancer_study_identifier, data_filename = "data_mutations_extended.txt") {
   df_file <- create_meta_genomic_generic(cancer_study_identifier = cancer_study_identifier, 
                                          genetic_alteration_type = "MUTATION_EXTENDED", 
                                          datatype = "MAF", 
@@ -168,18 +172,19 @@ create_meta_seg <- function(cancer_study_identifier, data_filename = "") {
                                      datatype = "SEG", 
                                      reference_genome_id = "hg19", 
                                      description = "Segment data for the genie study", 
-                                     data_filename = data_filename) {
+                                     data_filename = data_filename)
     
   return(df_file)
 }
 
-create_meta_study <- function() {
-  df_file <- create_meta_study_generic(type_of_cancer = type_of_cancer, 
-                                       cancer_study_identifier, 
-                                       name, 
-                                       description, 
-                                       groups, 
-                                       short_name)
+create_meta_study <- function(cancer_study_identifier, name, description, short_name) {
+  splt <- strsplit(data_filename, split = "|")[[1]]
+  df_file <- create_meta_study_generic(cancer_study_identifier = cancer_study_identifier,
+                                       type_of_cancer = "mixed", 
+                                       name = name, 
+                                       description = description, 
+                                       groups = "GENIE", 
+                                       short_name = short_name)
   return(df_file)
 }
 
@@ -201,10 +206,15 @@ get_fxn <- function(file_type,
   return(map_fxn_str[[glue("create_meta_{file_type}")]])
 }
 
-create_meta <- function(file_type) {
+create_meta <- function(file_type, cancer_study_identifier, data_filename) {
   
   fxn <- get_fxn(file_type)
-  df_type <- fxn()
+  if (is.null(data_filesnames)) {
+    df_type <- fxn(cancer_study_identifier)
+  } else {
+    df_type <- fxn(cancer_study_identifier, data_filename = data_filenames[file_type])
+  }
+  
   return(df_type)
 }
 
@@ -222,27 +232,49 @@ write_meta <- function(df_file, filename) {
 
 status <- synLogin(auth = auth)
 
-# read ----------------------------
+# read -----------------------------
 
+# get all data files in the cbioportal folder
+synid_folder_children <- get_synapse_folder_children(synapse_id, include_types=list("file"))
+filenames <- synid_folder_children[grepl(pattern = "^data_", x = names(synid_folder_children))]
 
 # main ----------------------------
 
+map_type <- setNames(names(config$cbioportal$data), unlist(config$cbioportal$data))
+filenames <- c(filenames, "meta_study.txt")
+
 for (i in 1:length(filenames)) {
-  file_name <- filenames[i]
-  file_type <- names(filenames)[i]
   
-  df_file <- create_meta(file_type)
-  write_meta(df_file, filename) 
+  file_name <- filenames[i]
+  df_file <- NULL
+  
+  if (file_name == config$cbioportal$meta$study) {
+    df_file <- create_meta_study(file_type = "study", 
+                           cancer_study_identifier = cancer_study_identifier, 
+                           name = name,
+                           description = description,
+                           short_name = short_name)
+    outfile = config$cbioportal$meta$study
+  } else {
+    file_type <- as.character(map_type[file_name])
+    df_file <- create_meta(file_type = file_type, 
+                           cancer_study_identifier = cancer_study_identifier, 
+                           data_filename = file_name)
+    outfile <- gsub(pattern = "data", replacement = "meta", x = file_name)
+  }
+  
+  
+  write_meta(df_file, outfile)
   
   if (!is.na(synid_folder_output)) {
-    synid_file_output <- save_to_synapse(path = filename, 
+    synid_file_output <- save_to_synapse(path = outfile, 
                                           parent_id = synid_folder_output, 
-                                          file_name = filename, 
+                                          file_name = outfile, 
                                           prov_name = "cBioPortal meta file", 
                                           prov_desc = "cBioPortal meta files for annotating provided cBioPortal data files", 
                                           prov_used = NA, 
                                           prov_exec = "https://github.com/Sage-Bionetworks/genie-erbb2-cbio/blob/develop/create_meta.R")
-                        }
+  }
 }
 
 # close out ----------------------------
