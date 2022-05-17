@@ -56,7 +56,7 @@ Rscript create_panel.R -i $synid_folder_cbio_staging -g $synid_folder_mg -o $syn
 rm -rf erbb2/
 synapse get --downloadLocation erbb2/ -r $synid_folder_cbio_staging
 rm erbb2/SYNAPSE_METADATA_MANIFEST.tsv erbb2/*/SYNAPSE_METADATA_MANIFEST.tsv
-python $HOME/cbioportal/core/src/main/scripts/importer/validateData.py -s erbb2/ -v -n | grep ERROR
+python ../cbioportal/core/src/main/scripts/importer/validateData.py -s erbb2/ -v -n | grep ERROR
 
 #########################
 #       NON-GENIE      #
@@ -90,4 +90,4 @@ Rscript create_case.R -i $synid_folder_cbio_final -o $synid_folder_cbio_final -v
 rm -rf erbb2/
 synapse get --downloadLocation erbb2/ -r syn30156238
 rm erbb2/SYNAPSE_METADATA_MANIFEST.tsv erbb2/*/SYNAPSE_METADATA_MANIFEST.tsv
-python $HOME/cbioportal/core/src/main/scripts/importer/validateData.py -s erbb2/ -v -n | grep ERROR
+python ../cbioportal/core/src/main/scripts/importer/validateData.py -s erbb2/ -v -n | grep ERROR
