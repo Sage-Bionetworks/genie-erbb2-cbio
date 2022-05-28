@@ -19,17 +19,17 @@ config <- read_yaml("config.yaml")
 # user input ----------------------------
 
 option_list <- list( 
-  make_option(c("-i", "--synid_file_input"), type = "character",
-              help="Synapse ID of input file"),
+  make_option(c("-i", "--synid_folder_input"), type = "character",
+              help="Synapse ID of folder containing cBioPortal data files"),
   make_option(c("-o", "--synid_folder_output"), type = "character",
-              help="Synapse ID of output folder"),
+              help="Synapse ID of output folder for cBioPortal meta files"),
   make_option(c("-c", "--cancer_study_identifier"), type = "character", default = "genie_erbb2",
               help="Study identifier for labeling cBioPortal files"),
   make_option(c("-n", "--name"), type = "character", default = "GENIE ERBB2 Sponsored Project",
               help="Study name"),
   make_option(c("-s", "--short_name"), type = "character", default = "ERBB2",
               help="Study short name"),
-  make_option(c("-d", "--description"), type = "character", default = "GENIE ERBB2 Sponsored Project",
+  make_option(c("-d", "--description"), type = "character", default = "GENIE ERBB2 Sponsored Project clinical and genomic data",
               help="Study description"),
   make_option(c("-v", "--verbose"), action="store_true", default = FALSE, 
               help="Output script messages to the user."),
@@ -42,7 +42,7 @@ opt <- parse_args(OptionParser(option_list=option_list))
 waitifnot(!is.null(opt$synid_file_input) && !is.null(opt$synid_folder_output),
           msg = "Rscript create_meta.R -h")
 
-synid_file_input <- opt$synid_file_input
+synid_folder_input <- opt$synid_folder_input
 synid_folder_output <- opt$synid_folder_output
 cancer_study_identifier <- opt$cancer_study_identifier
 name <- opt$name
@@ -50,7 +50,6 @@ short_name <- opt$short_name
 description <- opt$description
 verbose <- opt$verbose
 auth <- opt$auth
-
 
 # functions ----------------------------
 
@@ -194,7 +193,7 @@ create_meta_study <- function(cancer_study_identifier, name, description, short_
 #' @param file_types vector of string representing all valid file type labels
 #' @return object representing function
 get_fxn <- function(file_type, 
-                    file_types = c("patient", "sample", "timeline", "cna", "matrix", "maf", "seg", "study")) {
+                    file_types = c("patient", "sample", "timeline", "cna", "matrix", "maf", "seg", "study", "fusion")) {
   
   map_fxn_str <- list()
   names_fxn <- paste0("create_meta_", file_types)
@@ -209,10 +208,10 @@ get_fxn <- function(file_type,
 create_meta <- function(file_type, cancer_study_identifier, data_filename) {
   
   fxn <- get_fxn(file_type)
-  if (is.null(data_filesnames)) {
+  if (is.null(data_filename)) {
     df_type <- fxn(cancer_study_identifier)
   } else {
-    df_type <- fxn(cancer_study_identifier, data_filename = data_filenames[file_type])
+    df_type <- fxn(cancer_study_identifier, data_filename = data_filename)
   }
   
   return(df_type)
@@ -235,13 +234,13 @@ status <- synLogin(auth = auth)
 # read -----------------------------
 
 # get all data files in the cbioportal folder
-synid_folder_children <- get_synapse_folder_children(synapse_id, include_types=list("file"))
+synid_folder_children <- get_synapse_folder_children(synid_folder_output, include_types=list("file"))
 filenames <- synid_folder_children[grepl(pattern = "^data_", x = names(synid_folder_children))]
 
 # main ----------------------------
 
 map_type <- setNames(names(config$cbioportal$data), unlist(config$cbioportal$data))
-filenames <- c(filenames, "meta_study.txt")
+filenames <- c(names(filenames), "meta_study.txt")
 
 for (i in 1:length(filenames)) {
   
@@ -249,14 +248,14 @@ for (i in 1:length(filenames)) {
   df_file <- NULL
   
   if (file_name == config$cbioportal$meta$study) {
-    df_file <- create_meta_study(file_type = "study", 
+    df_file <- create_meta_study(
                            cancer_study_identifier = cancer_study_identifier, 
                            name = name,
                            description = description,
                            short_name = short_name)
     outfile = config$cbioportal$meta$study
   } else {
-    file_type <- as.character(map_type[file_name])
+    file_type <- as.character(map_type[tolower(file_name)])
     df_file <- create_meta(file_type = file_type, 
                            cancer_study_identifier = cancer_study_identifier, 
                            data_filename = file_name)
