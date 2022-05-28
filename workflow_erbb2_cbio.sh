@@ -51,6 +51,7 @@ Rscript create_clinical.R -i $synid_file_uncoded_fix -m $synid_table_map -o $syn
 Rscript create_genomic.R -i $synid_file_uncoded_fix -g $synid_folder_mg -o $synid_folder_cbio_staging -v 
 Rscript create_case.R -i $synid_folder_cbio_staging -o $synid_folder_cbio_staging -v
 Rscript create_panel.R -i $synid_folder_cbio_staging -g $synid_folder_mg -o $synid_folder_cbio_staging -v
+Rscript create_meta.R -i $synid_folder_cbio_staging -o $synid_folder_cbio_staging -v 
 
 # validate genie files
 rm -rf erbb2/
