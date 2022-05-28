@@ -19,18 +19,6 @@ source("shared_fxns.R")
 cancer_study_identifier <- "genie_erbb2"
 filename <- "data_gene_panel_{panel_name}.txt"
 
-waitifnot <- function(cond, msg) {
-  if (!cond) {
-    
-    for (str in msg) {
-      message(str)
-    }
-    message("Press control-C to exit and try again.")
-    
-    while(T) {}
-  }
-}
-
 # user input ----------------------------
 
 option_list <- list( 
